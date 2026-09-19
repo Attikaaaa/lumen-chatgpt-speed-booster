@@ -6,12 +6,12 @@ Lumen fixes that. It keeps only the last few messages loaded, so every chat feel
 
 ## What you get
 
-- Long chats open instantly, even with thousands of messages
-- Smooth scrolling, always
-- About 97% less data downloaded, 62x smaller page for your browser
-- Old messages are not lost: scroll up and they load on demand
-- Less memory and CPU use, better battery life
-- ChatGPT's background trackers are blocked
+- Long chats open **instantly**, even with thousands of messages
+- Smooth scrolling, **always**
+- **97% less data** downloaded, **62x smaller page** for your browser
+- Old messages are not lost: **scroll up and they load on demand**
+- Less memory and CPU use, **better battery life**
+- ChatGPT's background trackers are **blocked**
 - Nothing appears inside the page. No buttons, no banners
 
 The numbers were measured on realistic conversation data, see [BENCHMARKS.md](BENCHMARKS.md).
@@ -22,7 +22,7 @@ The numbers were measured on realistic conversation data, see [BENCHMARKS.md](BE
 2. Turn on Developer mode (top right)
 3. Click Load unpacked and pick this folder
 
-Then open ChatGPT and use it like always.
+Then open ChatGPT and use it like always. **Free, no account needed.**
 
 ## Usage
 
@@ -30,7 +30,7 @@ Works out of the box. Scroll up in a chat to load older messages. Click the Lume
 
 ## Privacy
 
-No account, no tracking, no external requests. Lumen never reads, stores or sends your conversations. See [PRIVACY.md](PRIVACY.md).
+**No account, no tracking, no external requests.** Lumen never reads, stores or sends your conversations. See [PRIVACY.md](PRIVACY.md).
 
 Works on chatgpt.com in Chrome and Chromium-based browsers (Edge, Brave, Opera). Not affiliated with OpenAI.
 
