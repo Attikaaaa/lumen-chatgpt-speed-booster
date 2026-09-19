@@ -4,6 +4,8 @@ ChatGPT gets slow when a chat gets long. Pages take forever to load, scrolling s
 
 Lumen fixes that. It keeps only the last few messages loaded, so every chat feels short and fast no matter how big it is.
 
+![Lumen demo](assets/lumen-demo.gif)
+
 ## What you get
 
 - Long chats open **instantly**, even with thousands of messages
