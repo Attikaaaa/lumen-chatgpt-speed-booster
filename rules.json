@@ -1,0 +1,101 @@
+[
+  {
+    "id": 1,
+    "priority": 1,
+    "action": { "type": "block" },
+    "condition": {
+      "requestDomains": ["ingest.sentry.io"],
+      "resourceTypes": ["websocket", "xmlhttprequest", "ping", "image", "media", "script", "font", "stylesheet", "sub_frame", "other", "csp_report"]
+    }
+  },
+  {
+    "id": 2,
+    "priority": 1,
+    "action": { "type": "block" },
+    "condition": {
+      "requestDomains": ["statsig.com", "statsigapi.net", "featuregates.org"],
+      "resourceTypes": ["websocket", "xmlhttprequest", "ping", "image", "media", "script", "font", "stylesheet", "sub_frame", "other", "csp_report"]
+    }
+  },
+  {
+    "id": 3,
+    "priority": 1,
+    "action": { "type": "block" },
+    "condition": {
+      "requestDomains": ["intercom.io", "intercomcdn.com"],
+      "resourceTypes": ["websocket", "xmlhttprequest", "ping", "image", "media", "script", "font", "stylesheet", "sub_frame", "other", "csp_report"]
+    }
+  },
+  {
+    "id": 4,
+    "priority": 1,
+    "action": { "type": "block" },
+    "condition": {
+      "urlFilter": "||ab.chatgpt.com^",
+      "resourceTypes": ["websocket", "xmlhttprequest", "ping", "image", "media", "script", "font", "stylesheet", "sub_frame", "other", "csp_report"]
+    }
+  },
+  {
+    "id": 5,
+    "priority": 1,
+    "action": { "type": "block" },
+    "condition": {
+      "requestDomains": ["bzr.openai.com", "bzrcdn.openai.com"],
+      "resourceTypes": ["websocket", "xmlhttprequest", "ping", "image", "media", "script", "font", "stylesheet", "sub_frame", "other", "csp_report"]
+    }
+  },
+  {
+    "id": 6,
+    "priority": 1,
+    "action": { "type": "block" },
+    "condition": {
+      "urlFilter": "||chatgpt.com/ces/",
+      "resourceTypes": ["xmlhttprequest", "ping"]
+    }
+  },
+  {
+    "id": 7,
+    "priority": 1,
+    "action": { "type": "block" },
+    "condition": {
+      "requestDomains": ["oaistatsig.com"],
+      "resourceTypes": ["websocket", "xmlhttprequest", "ping", "image", "media", "script", "font", "stylesheet", "sub_frame", "other", "csp_report"]
+    }
+  },
+  {
+    "id": 8,
+    "priority": 1,
+    "action": { "type": "block" },
+    "condition": {
+      "urlFilter": "||chatgpt.com/awe/",
+      "resourceTypes": ["xmlhttprequest", "ping"]
+    }
+  },
+  {
+    "id": 9,
+    "priority": 1,
+    "action": { "type": "block" },
+    "condition": {
+      "urlFilter": "||chatgpt.com/unauth-mweb/events/",
+      "resourceTypes": ["xmlhttprequest", "ping"]
+    }
+  },
+  {
+    "id": 10,
+    "priority": 1,
+    "action": { "type": "block" },
+    "condition": {
+      "urlFilter": "||chatgpt.com/backend-api/sentinel/ping",
+      "resourceTypes": ["xmlhttprequest", "ping"]
+    }
+  },
+  {
+    "id": 11,
+    "priority": 1,
+    "action": { "type": "block" },
+    "condition": {
+      "urlFilter": "||chatgpt.com/backend-api/codex/app-download-signal",
+      "resourceTypes": ["xmlhttprequest", "ping"]
+    }
+  }
+]

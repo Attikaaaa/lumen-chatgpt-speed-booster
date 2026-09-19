@@ -1,0 +1,41 @@
+{
+  "extensionName": {
+    "message": "Lumen — ChatGPT Speed Booster"
+  },
+  "extensionDescription": {
+    "message": "Keeps ChatGPT fast and light. Only recent messages are rendered — older ones load on demand as you scroll up."
+  },
+  "statusActive": {
+    "message": "Active"
+  },
+  "statusPaused": {
+    "message": "Paused"
+  },
+  "renderedLabel": {
+    "message": "In view"
+  },
+  "totalLabel": {
+    "message": "Total"
+  },
+  "memorySavedLabel": {
+    "message": "Saved"
+  },
+  "boosterLabel": {
+    "message": "Speed booster"
+  },
+  "keepLastLabel": {
+    "message": "Keep last"
+  },
+  "optimizeNow": {
+    "message": "Optimize"
+  },
+  "reloadPage": {
+    "message": "Reload page"
+  },
+  "notOnChatGPT": {
+    "message": "Not a ChatGPT tab"
+  },
+  "notOnChatGPTSub": {
+    "message": "Open a ChatGPT conversation to use Lumen."
+  }
+}

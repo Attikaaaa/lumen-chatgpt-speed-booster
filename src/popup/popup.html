@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Lumen</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+
+  <!-- Main view -->
+  <div id="mainView" class="view">
+
+    <header class="lx-header">
+      <span class="lx-title">Lumen</span>
+      <div class="lx-status" id="statusChip">
+        <span class="lx-status-dot"></span>
+        <span id="statusText"></span>
+      </div>
+    </header>
+
+    <section class="lx-section">
+      <div class="lx-hero-value" id="memorySaved">—</div>
+      <div class="lx-hero-sub" id="subLine">—</div>
+      <div class="lx-gauge"><span class="lx-gauge-dot" id="gaugeDot"></span></div>
+    </section>
+
+    <section class="lx-section lx-rows">
+      <div class="lx-row">
+        <span class="lx-label" data-i18n="boosterLabel"></span>
+        <label class="lx-switch">
+          <input type="checkbox" id="enabled">
+          <span class="lx-track"></span>
+        </label>
+      </div>
+      <div class="lx-row">
+        <span class="lx-label" data-i18n="keepLastLabel"></span>
+        <div class="lx-stepper">
+          <button id="limitDec" aria-label="−">
+            <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M1.5 5h7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+          </button>
+          <input id="limitDisplay" type="number" min="2" max="200" value="10">
+          <button id="limitInc" aria-label="+">
+            <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M5 1.5v7M1.5 5h7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <div class="lx-actions">
+      <button id="optimizeNow" class="lx-primary" data-i18n="optimizeNow"></button>
+      <button id="reloadPage" class="lx-icon" aria-label="Reload">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+          <path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v5h-5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </button>
+    </div>
+
+  </div>
+
+  <!-- Blocked view -->
+  <div id="blockedView" class="view hidden">
+    <div class="lx-blocked">
+      <p class="lx-blocked-title" data-i18n="notOnChatGPT"></p>
+      <p class="lx-blocked-sub" data-i18n="notOnChatGPTSub"></p>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

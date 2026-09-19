@@ -1,0 +1,66 @@
+/*
+ * Lumen — ChatGPT Speed Booster · content stylesheet.
+ * Rendering-cost rules + styling for archive turns loaded on scroll-up.
+ */
+
+/* ══ 1. Rendering cost reduction ═══════════════════════════════════════ */
+
+/* Off-screen turns skip layout and paint entirely — the single biggest
+   win for long conversations. */
+article[data-testid^="conversation-turn"] {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 140px;
+  contain: layout style;
+}
+
+/* The sidebar chat list renders only the rows actually on screen. */
+nav li {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 44px;
+}
+
+/* GPU-heavy frosted-glass blur is removed everywhere; transitions no
+   longer delay UI feedback. Keyframe animations (spinners) are kept. */
+* {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  transition: none !important;
+}
+
+/* Programmatic jumps happen instantly (JS-driven smooth scrolling is
+   rewritten at prototype level by the main-world bridge). */
+html {
+  scroll-behavior: auto !important;
+}
+
+/* ══ 2. Archive turns ("ghosts") ═══════════════════════════════════════ */
+
+/* Read-only turns mounted above the thread when older messages are loaded
+   on demand. Styled to blend into both ChatGPT themes. */
+.lumen-ghost {
+  max-width: 48rem;
+  margin: 0 auto;
+  padding: 14px 18px;
+  border-bottom: 1px solid rgba(128, 128, 128, 0.16);
+  color: inherit;
+  opacity: 0.92;
+}
+
+.lumen-ghost:first-child {
+  padding-top: 6px;
+}
+
+.lumen-ghost-role {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  opacity: 0.55;
+  margin-bottom: 4px;
+}
+
+.lumen-ghost-body {
+  font-size: 15px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}

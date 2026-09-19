@@ -1,0 +1,11 @@
+# Chrome-generated
+_metadata/
+
+# Build artifacts
+*.zip
+*.crx
+*.pem
+
+# OS noise
+.DS_Store
+Thumbs.db

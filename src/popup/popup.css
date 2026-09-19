@@ -1,0 +1,344 @@
+/**
+ * Lumen — popup stylesheet.
+ *
+ * Design system:
+ *   Title   Inter 18/24 Medium
+ *   Body    Inter 14/21 Regular
+ *   Labels  Inter 14/16 Medium
+ *   Controls 36px height · 10px radius
+ *   Inputs  12px padding · -0.15px letter-spacing
+ *   Spacing 16px fields · 32px sections
+ *   Colors  #F2F2F2 strong · #9B9B9C subtle · #5A5A5B placeholder
+ *           #FFFFFF CTA · #0091FF link · #141414 base
+ */
+
+/* ══ Font (bundled — no external requests) ═════════════════════════════ */
+
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("fonts/InterVariable.woff2") format("woff2");
+}
+
+/* ══ Tokens ════════════════════════════════════════════════════════════ */
+
+:root {
+  --strong: #F2F2F2;
+  --subtle: #9B9B9C;
+  --placeholder: #5A5A5B;
+  --cta: #FFFFFF;
+  --cta-text: #111111;
+  --link: #0091FF;
+  --border: #2A2A2A;
+  --bg: #141414;
+
+  --radius: 10px;
+  --outer-radius: 14px;
+  --control-h: 36px;
+  --pad-x: 16px;
+}
+
+/* ══ Base — rounded popup on all four corners ══════════════════════════ */
+
+html {
+  background: transparent;
+}
+
+html, body {
+  border-radius: var(--outer-radius);
+}
+
+body {
+  width: 320px;
+  min-height: 396px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--strong);
+  font-family: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-size: 14px;
+  line-height: 21px;
+  font-weight: 400;
+  letter-spacing: -0.15px;
+  -webkit-font-smoothing: antialiased;
+}
+
+.view {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+
+.view.hidden {
+  display: none;
+}
+
+/* ══ Header ════════════════════════════════════════════════════════════ */
+
+.lx-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px var(--pad-x) 0;
+}
+
+.lx-title {
+  font-size: 18px;
+  line-height: 24px;
+  font-weight: 500;
+  letter-spacing: -0.15px;
+}
+
+.lx-status {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 14px;
+  line-height: 16px;
+  font-weight: 500;
+  color: var(--link);
+}
+
+.lx-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.lx-status.is-paused {
+  color: var(--placeholder);
+}
+
+/* ══ Sections — 32px apart ═════════════════════════════════════════════ */
+
+.lx-section {
+  margin-top: 32px;
+  padding: 0 var(--pad-x);
+}
+
+/* Hero metric */
+.lx-hero-value {
+  font-size: 32px;
+  line-height: 38px;
+  font-weight: 500;
+  letter-spacing: -0.4px;
+  font-variant-numeric: tabular-nums;
+}
+
+.lx-hero-sub {
+  margin-top: 2px;
+  color: var(--subtle);
+  font-variant-numeric: tabular-nums;
+}
+
+.lx-gauge {
+  position: relative;
+  height: 2px;
+  margin-top: 14px;
+  border-radius: 999px;
+  background: var(--border);
+}
+
+.lx-gauge-dot {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--link);
+  transform: translate(-50%, -50%);
+  transition: left 0.25s ease;
+}
+
+/* Control rows */
+.lx-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 56px;
+}
+
+.lx-row + .lx-row {
+  border-top: 1px solid var(--border);
+}
+
+.lx-label {
+  font-size: 14px;
+  line-height: 16px;
+  font-weight: 500;
+}
+
+/* ══ Controls (36px height · 10px radius) ══════════════════════════════ */
+
+.lx-switch {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  height: var(--control-h);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.lx-switch input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.lx-track {
+  width: 40px;
+  height: 22px;
+  border-radius: 999px;
+  background: #3A3A3A;
+  transition: background 0.15s ease;
+}
+
+.lx-track::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #FFFFFF;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
+  transform: translateY(-50%);
+  transition: transform 0.15s ease;
+}
+
+.lx-switch input:checked + .lx-track {
+  background: var(--link);
+}
+
+.lx-switch input:checked + .lx-track::after {
+  transform: translate(18px, -50%);
+}
+
+.lx-stepper {
+  display: flex;
+  align-items: center;
+  height: var(--control-h);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.lx-stepper button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 100%;
+  border: none;
+  background: transparent;
+  color: var(--subtle);
+  cursor: pointer;
+}
+
+.lx-stepper button:hover {
+  color: var(--strong);
+}
+
+.lx-stepper input {
+  width: 40px;
+  height: 100%;
+  border: none;
+  border-left: 1px solid var(--border);
+  border-right: 1px solid var(--border);
+  background: transparent;
+  color: var(--strong);
+  font: inherit;
+  font-size: 14px;
+  line-height: 16px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  outline: none;
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+
+.lx-stepper input::-webkit-outer-spin-button,
+.lx-stepper input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+}
+
+.lx-stepper input:focus {
+  background: #1C1C1C;
+}
+
+/* ══ Actions — pinned to the bottom of the popup ═══════════════════════ */
+
+.lx-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: auto;
+  padding: 14px var(--pad-x) 16px;
+  border-top: 1px solid var(--border);
+}
+
+.lx-primary {
+  flex: 1;
+  height: var(--control-h);
+  border: none;
+  border-radius: var(--radius);
+  background: var(--cta);
+  color: var(--cta-text);
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 16px;
+  font-weight: 500;
+  letter-spacing: -0.15px;
+  cursor: pointer;
+}
+
+.lx-primary:hover {
+  background: #E6E6E6;
+}
+
+.lx-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--control-h);
+  height: var(--control-h);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--subtle);
+  cursor: pointer;
+}
+
+.lx-icon:hover {
+  color: var(--strong);
+  border-color: var(--placeholder);
+}
+
+/* ══ Blocked view ══════════════════════════════════════════════════════ */
+
+.lx-blocked {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  gap: 4px;
+  padding: 24px;
+  text-align: center;
+}
+
+.lx-blocked-title {
+  font-size: 18px;
+  line-height: 24px;
+  font-weight: 500;
+}
+
+.lx-blocked-sub {
+  color: var(--subtle);
+}
