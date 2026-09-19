@@ -337,6 +337,8 @@
       const url = input instanceof Request ? input.url : String(input);
       const method = (init.method || (input instanceof Request ? input.method : 'GET') || 'GET').toUpperCase();
 
+      /* Streaming output (the token-by-token POST) never matches here —
+         it passes through raw, so Lumen cannot delay message output. */
       if (!(settings.enabled && isConversationGet(url, method))) {
         return originalFetch(...args);
       }

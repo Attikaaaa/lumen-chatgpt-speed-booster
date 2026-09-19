@@ -67,6 +67,11 @@
   /** rAF coalescing flag for the DOM limiter. */
   let turnLimitQueued = false;
 
+  /** Last DOM state the limiter applied — enables a zero-work fast path
+      while a response is streaming (count unchanged → skip the loop). */
+  let appliedDomTotal = -1;
+  let appliedHideCount = -1;
+
   /** Progressive archive loader state (per conversation). */
   const archive = {
     conversationId: '',
@@ -120,6 +125,8 @@
     const domTotal = turns.length;
 
     if (domTotal === 0) {
+      appliedDomTotal = 0;
+      appliedHideCount = 0;
       if (lastStatus.totalMessages !== 0 || lastStatus.hiddenMessages !== 0) {
         lastStatus.totalMessages = Math.max(fetchTotal, 0);
         lastStatus.renderedMessages = 0;
@@ -134,13 +141,19 @@
       : KEEP_HARD_CAP;
     const hideCount = Math.max(0, domTotal - keep);
 
-    for (let i = 0; i < domTotal; i++) {
-      const el = turns[i];
-      if (i < hideCount) {
-        if (el.style.display !== 'none') el.style.display = 'none';
-      } else if (el.style.display === 'none') {
-        el.style.display = '';
+    /* Fast path: while a response streams in, the turn count only changes
+       when a turn is added — per-token frames skip the DOM pass entirely. */
+    if (domTotal !== appliedDomTotal || hideCount !== appliedHideCount) {
+      for (let i = 0; i < domTotal; i++) {
+        const el = turns[i];
+        if (i < hideCount) {
+          if (el.style.display !== 'none') el.style.display = 'none';
+        } else if (el.style.display === 'none') {
+          el.style.display = '';
+        }
       }
+      appliedDomTotal = domTotal;
+      appliedHideCount = hideCount;
     }
 
     const total = Math.max(fetchTotal, domTotal);
@@ -409,6 +422,8 @@
     archive.injected = 0;
     archive.lastFetch = 0;
     archive.conversationId = '';
+    appliedDomTotal = -1;
+    appliedHideCount = -1;
     document.querySelectorAll(`.${GHOST_CLASS}`).forEach(node => node.remove());
     lastStatus = {
       layoutSupported: null,
