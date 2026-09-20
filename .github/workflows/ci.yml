@@ -24,8 +24,8 @@ jobs:
           node --check src/content/library.js
           node --check src/popup/popup.js
 
-      - name: Install test dependencies (puppeteer-core, no Chromium download)
-        run: npm install --no-fund --no-audit
+      - name: Install test dependencies from lockfile (puppeteer-core, no Chromium download)
+        run: npm ci --no-fund --no-audit
 
       - name: Unit + regression tests (auto-discovered)
         run: node test/run-all.mjs

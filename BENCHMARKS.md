@@ -70,10 +70,10 @@ therefore needs the manual checks in [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md
 | Main-thread JSON parsing at load | near zero after trim; remaining work moved off-thread |
 | Layout/paint node participation in long chats | **−99 %** (23,008 → ~231 participating nodes in the 1,000-turn benchmark) |
 
-**One-line summary:** in the synthetic benchmarks Lumen hands the frontend a
-75–99× smaller serialized payload and leaves ~99 % fewer nodes participating
-in layout, which removes most of the main-thread work that grows with chat
-length.
+**One-line summary:** in the synthetic benchmarks Lumen hands the frontend an
+**up to ~75× smaller** serialized payload (19.7× at 250 messages, growing
+with chat length) and leaves ~99 % fewer nodes participating in layout,
+which removes most of the main-thread work that grows with chat length.
 
 ## Honest limitations
 

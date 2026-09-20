@@ -28,7 +28,7 @@ here can be skipped just because CI is green.
 - [ ] Programmatic smooth-scroll behaves natively again (no instant-jump rewriting)
 - [ ] Sidebar rows render normally (no content-visibility shortcut)
 - [ ] Transitions/backdrop-blur are back (animation toggle no longer applied)
-- [ ] Telemetry requests fire again (Network tab: no blocked statsig/sentry calls)
+- [ ] Telemetry requests are no longer blocked by Lumen; if ChatGPT emits them, they appear unblocked in DevTools Network (ChatGPT may not emit one during the observation window — that is not a failure)
 
 ## Resume
 
@@ -94,7 +94,15 @@ Check ghost-rendered (older) messages containing:
 
 ## Telemetry blocking
 
-- [ ] DevTools Network: statsig / sentry / intercom requests blocked while
-      Lumen is enabled AND "Block trackers" is on
-- [ ] Toggling "Block trackers" off (while enabled) unblocks them
-- [ ] Non-ChatGPT websites are never affected
+These checks verify Lumen's blocking state, not that ChatGPT emits any
+particular request — ChatGPT decides which requests it sends, and may not
+send one during your observation window.
+
+- [ ] With Lumen enabled AND "Block trackers" on: any statsig / sentry /
+      intercom requests that ChatGPT emits appear blocked in DevTools
+      Network
+- [ ] With "Block trackers" off (Lumen still enabled): Lumen no longer
+      blocks those request classes — if ChatGPT emits them, they appear
+      unblocked
+- [ ] With master Pause: Lumen no longer blocks them (same observation)
+- [ ] Unrelated websites remain unaffected in all states

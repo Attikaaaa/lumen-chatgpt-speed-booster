@@ -30,7 +30,7 @@ Then open ChatGPT and use it like always. **Free, no account needed.**
 
 ## Usage
 
-Works out of the box. Scroll up in a chat to load older messages. Click the Lumen icon to switch profiles, toggle individual features, or pause. The Lumen Library button sits in the page's corner; it stores folders, pins and tags in your browser only.
+Works out of the box. Scroll up in a chat to load older messages. Click the Lumen icon to switch profiles, toggle individual features, or pause. The Lumen Library button sits in the page's corner; it stores folders and pins in your browser only.
 
 ## Privacy
 

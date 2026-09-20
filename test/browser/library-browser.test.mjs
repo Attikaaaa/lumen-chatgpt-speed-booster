@@ -1,12 +1,25 @@
 /**
- * Library browser integration test — drives the REAL shipped
- * library-core.js + library.js in headless Chrome (system Chrome via
- * puppeteer-core, no bundled download).
+ * Library browser integration test — integration testing of the Library
+ * UI only, NOT a live chatgpt.com extension E2E test.
  *
- * Covered interactions: open/close, current-chat capture across SPA
- * navigations, row rendering, pin toggle, Pinned/All filters, folder
- * creation + folder filtering, search, bulk selection + move, item
- * deletion.
+ * What it does:
+ *  - launches real Chrome (system binary via puppeteer-core, no bundled
+ *    Chromium download)
+ *  - injects the real shipped library-core.js + library.js
+ *
+ * What is controlled/stubbed (by design):
+ *  - chatgpt.com pages are intercepted and answered with synthetic HTML
+ *    (no real ChatGPT, no SPA shell, no account)
+ *  - chrome.storage.local is a stub backed by sessionStorage
+ *
+ * It therefore proves Library UI behavior (rendering, handlers, filters,
+ * persistence through the shipped code paths), while live ChatGPT
+ * compatibility is covered by RELEASE_CHECKLIST.md.
+ *
+ * Covered interactions: open/close, current-chat capture across SPA-style
+ * navigations (real page reloads), row rendering, pin toggle, Pinned/All
+ * filters, folder creation + folder filtering, search, bulk selection +
+ * move, item deletion.
  * Regression guards: items actually appended, All/Pinned handlers live,
  * pin and delete never confused, pinned-first/newest-first sort, and no
  * handler duplication after repeated renders.
