@@ -1,0 +1,12 @@
+{
+  "name": "lumen-chatgpt-speed-booster",
+  "private": true,
+  "description": "Lumen — ChatGPT Speed Booster (Chrome MV3 extension)",
+  "scripts": {
+    "test": "node test/run-all.mjs",
+    "test:browser": "node test/browser/library-browser.test.mjs"
+  },
+  "devDependencies": {
+    "puppeteer-core": "^23.11.1"
+  }
+}

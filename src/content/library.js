@@ -166,7 +166,7 @@
     <div class="folders" role="tablist"></div>
     <div class="list"></div>
     <div class="bulk"><span></span><button class="bmove">Move…</button><button class="bdel">Delete</button></div>
-    <div class="ft">Folders, pins and tags are stored locally in your browser.</div>
+    <div class="ft">Folders and pins are stored locally in your browser.</div>
   `;
 
   function ensureHost() {

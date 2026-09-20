@@ -11,7 +11,7 @@ Lumen fixes that. It keeps only the last few messages active, so every chat feel
 - Long chats open with a **small, fixed rendering window** instead of the full history
 - Old messages are not lost: **scroll up and they load on demand**
 - Conversation payloads are trimmed locally, so your browser parses up to **~95-99% less conversation JSON** in synthetic benchmarks
-- Fewer turns participating in layout and paint means **less memory and CPU use**
+- Fewer turns participating in layout and paint, so long chats **reduce active rendering work**
 - ChatGPT's telemetry and analytics endpoints are **blocked** (ChatGPT-only scope, other sites untouched)
 - Four independent toggles: instant programmatic scrolling, sidebar optimization, animation trimming, telemetry blocking
 - Performance profiles: **Auto** (small chats stay fully native), Fast, Balanced, Extreme, Native, or a custom message limit

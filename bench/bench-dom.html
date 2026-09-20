@@ -10,6 +10,7 @@
   pre { background: #f4f4f4; padding: 12px; border-radius: 8px; overflow-x: auto; margin: 10px 0; }
   code { font: 13px/1.5 Consolas, monospace; }
   ul { margin: 8px 0 8px 22px; }
+  .animated { transition: opacity .15s; }
 </style>
 </head>
 <body>
@@ -19,6 +20,17 @@
   const N = 1000;
   const KEEP = 10;
   const results = {};
+
+  /* Mirrors v3.1 CORE_CSS (src/content/content.js) — the always-on core
+     rendering layer, applied whenever Lumen is enabled. */
+  const STYLE_CORE =
+    'article[data-testid^="conversation-turn"]{content-visibility:auto;contain-intrinsic-size:auto 140px;contain:layout style}' +
+    'html{scroll-behavior:auto!important}';
+
+  /* Mirrors v3.1 VISUAL_CSS — the optional "disable animations" toggle,
+     measured separately so it never mixes into the core result. */
+  const STYLE_ANIMATIONS_OFF =
+    '*{backdrop-filter:none!important;-webkit-backdrop-filter:none!important;transition:none!important}';
 
   /* Builds one ChatGPT-like conversation turn (role + rich markdown-ish body),
      wrapped 4 levels deep like the real app's container hierarchy. */
@@ -72,10 +84,6 @@
     };
   }
 
-  const STYLE_EXT =
-    'article[data-testid^="conversation-turn"]{content-visibility:auto;contain-intrinsic-size:auto 140px;contain:layout style}' +
-    '*{backdrop-filter:none!important;transition:none!important}html{scroll-behavior:auto!important}';
-
   /* Style+layout recalc proxy: runs on every UI update / streaming frame */
   function benchReflow() {
     const samples = [];
@@ -85,7 +93,14 @@
       void document.documentElement.offsetHeight;
       samples.push(performance.now() - t0);
     }
-    return +(samples.reduce((a, b) => a + b, 0) / 20).toFixed(2);
+    return +(samples.reduce((a, b) => a + b, 0).toFixed(2) / 20).toFixed(2);
+  }
+
+  function addStyle(css) {
+    const style = document.createElement('style');
+    style.textContent = css;
+    document.head.appendChild(style);
+    return style;
   }
 
   function run() {
@@ -93,14 +108,12 @@
     buildAll();
     results.noExt = { scroll: benchScroll(), reflowMs: benchReflow() };
 
-    /* ── Phase B: WITH Lumen CSS only (content-visibility, no cap) ── */
-    const style = document.createElement('style');
-    style.textContent = STYLE_EXT;
-    document.head.appendChild(style);
+    /* ── Phase B: v3.1 CORE layer only (turn virtualization CSS) ── */
+    addStyle(STYLE_CORE);
     buildAll();
-    results.lumenCss = { scroll: benchScroll() };
+    results.core = { scroll: benchScroll(), reflowMs: benchReflow() };
 
-    /* ── Phase C: WITH Lumen CSS + DOM limiter (default: last 10) ── */
+    /* ── Phase C: core + DOM limiter (default: last 10 participating) ── */
     buildAll();
     const turns = document.querySelectorAll('article[data-testid^="conversation-turn"]');
     const t0 = performance.now();
@@ -108,10 +121,18 @@
       if (i < turns.length - KEEP) turns[i].style.display = 'none';
     }
     void document.documentElement.offsetHeight;
-    results.lumenCssLimiter = { limiterMs: +(performance.now() - t0).toFixed(2), scroll: benchScroll(), reflowMs: benchReflow() };
-    results.lumenCssLimiter.visibleHeightPx = document.documentElement.scrollHeight;
+    results.coreLimiter = {
+      limiterMs: +(performance.now() - t0).toFixed(2),
+      scroll: benchScroll(),
+      reflowMs: benchReflow(),
+      participatingHeightPx: document.documentElement.scrollHeight
+    };
 
-    console.log('PHASE a done'); /*marker*/ console.log('LUMEN_DOM ' + JSON.stringify(results));
+    /* ── Phase D (optional toggle): core + animations-off, limiter on ── */
+    addStyle(STYLE_ANIMATIONS_OFF);
+    results.animationsOff = { scroll: benchScroll(), reflowMs: benchReflow() };
+
+    console.log('LUMEN_DOM ' + JSON.stringify(results));
     document.title = 'DONE';
   }
 
@@ -120,4 +141,3 @@
 </script>
 </body>
 </html>
-

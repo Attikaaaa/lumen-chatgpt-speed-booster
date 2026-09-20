@@ -20,3 +20,7 @@ frames/
 # benchmark generated files
 bench/lumen-bench-worker.js
 bench/chrome-tmp-profile/
+
+# npm
+node_modules/
+test/browser/*.png
