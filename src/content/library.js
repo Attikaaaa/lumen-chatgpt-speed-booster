@@ -10,6 +10,7 @@
  *    the library fills itself as you work.
  *  - Event handling is fully delegated on the shadow root: render() only
  *    builds DOM, listeners are attached exactly once.
+ *  - Item rows stay clean at rest; pin / move / delete appear on hover.
  */
 
 (() => {
@@ -89,61 +90,71 @@
       font-size: 13px; line-height: 1.45;
     }
     .panel.on { display: flex; }
-    .hd { display: flex; align-items: center; justify-content: space-between; padding: 12px 14px; border-bottom: 1px solid #2a2a2a; }
-    .hd b { font-size: 14px; }
-    .hd .x { background: none; border: 0; color: #9b9b9c; font-size: 16px; cursor: pointer; }
-    .tools { display: flex; gap: 6px; padding: 10px 14px; border-bottom: 1px solid #2a2a2a; }
+    .hd { display: flex; align-items: center; justify-content: space-between; padding: 14px 16px; border-bottom: 1px solid #2a2a2a; }
+    .hd b { font-size: 14px; letter-spacing: .01em; }
+    .hd .x { background: none; border: 0; color: #8a8a8b; font-size: 15px; cursor: pointer; padding: 4px 6px; border-radius: 6px; }
+    .hd .x:hover { background: #262626; color: #f2f2f2; }
+    .tools { display: flex; gap: 6px; padding: 12px 16px; border-bottom: 1px solid #2a2a2a; }
     .tools input[type=text] {
-      flex: 1; min-width: 0; height: 30px; padding: 0 10px; border: 1px solid #3a3a3a;
-      border-radius: 8px; background: #1c1c1c; color: #f2f2f2; outline: none; font-size: 12.5px;
+      flex: 1; min-width: 0; height: 32px; padding: 0 12px; border: 1px solid #3a3a3a;
+      border-radius: 9px; background: #1c1c1c; color: #f2f2f2; outline: none; font-size: 12.5px;
     }
     .tools input:focus { border-color: #0091ff; }
     .tools button { white-space: nowrap;
-      height: 30px; padding: 0 10px; border: 1px solid #3a3a3a; border-radius: 8px;
-      background: #1c1c1c; color: #f2f2f2; cursor: pointer; font-size: 12px;
+      height: 32px; padding: 0 11px; border: 1px solid #3a3a3a; border-radius: 9px;
+      background: #1c1c1c; color: #e6e6e6; cursor: pointer; font-size: 12px;
     }
-    .tools button:hover { background: #262626; }
-    .folders { display: flex; flex-wrap: wrap; gap: 6px; padding: 10px 14px; border-bottom: 1px solid #2a2a2a; }
+    .tools button:hover { background: #282828; border-color: #4a4a4a; }
+    .folders { display: flex; flex-wrap: wrap; gap: 6px; padding: 12px 16px; border-bottom: 1px solid #2a2a2a; }
     .fchip {
-      display: inline-flex; align-items: center; gap: 5px; padding: 3px 10px;
+      display: inline-flex; align-items: center; gap: 5px; padding: 4px 11px;
       border: 1px solid #3a3a3a; border-radius: 999px; background: transparent;
-      color: #cfcfcf; font-size: 11.5px; cursor: pointer;
+      color: #d4d4d4; font-size: 11.5px; cursor: pointer;
     }
     .fchip:hover { background: #1f1f1f; }
     .fchip.on { border-color: #0091ff; color: #7fc4ff; background: rgba(0,145,255,.08); }
-    .fchip .fdel { color: #777; margin-left: 2px; }
+    .fchip .fdel { color: #6d6d6e; margin-left: 1px; }
     .fchip .fdel:hover { color: #ff6b6b; }
-    .list { flex: 1; overflow-y: auto; padding: 8px 10px; }
-    .empty { padding: 26px 12px; text-align: center; color: #777; font-size: 12px; }
+    .list { flex: 1; overflow-y: auto; padding: 10px 12px; }
+    .empty { padding: 32px 16px; text-align: center; color: #7a7a7b; font-size: 12px; line-height: 1.7; }
     .item {
-      display: flex; align-items: center; gap: 8px; padding: 9px 10px; margin-bottom: 6px;
-      border: 1px solid #2a2a2a; border-radius: 10px; background: #1a1a1a;
+      display: flex; align-items: center; gap: 10px; padding: 11px 12px; margin-bottom: 6px;
+      border: 1px solid #262626; border-radius: 11px; background: #1a1a1a; cursor: pointer;
     }
-    .item input[type=checkbox] { accent-color: #0091ff; }
+    .item:hover { background: #1f1f1f; border-color: #343434; }
+    .item input[type=checkbox] { accent-color: #0091ff; opacity: .35; flex: none; cursor: pointer; }
+    .item:hover input[type=checkbox], .item input[type=checkbox]:checked { opacity: 1; }
+    .item .star { color: #ffc94d; font-size: 11px; flex: none; }
     .item .meta { flex: 1; min-width: 0; }
     .item .t { display: block; font-weight: 600; font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .item .f { display: block; font-size: 11px; color: #8f8f8f; }
-    .item select {
-      max-width: 92px; height: 26px; border: 1px solid #3a3a3a; border-radius: 6px;
-      background: #141414; color: #cfcfcf; font-size: 11px; outline: none;
+    .item .f { display: block; font-size: 11px; color: #8a8a8b; margin-top: 2px; }
+    .acts { display: flex; gap: 2px; flex: none; opacity: 0; transition: opacity .1s; }
+    .item:hover .acts { opacity: 1; }
+    .iconbtn {
+      width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center;
+      border: 0; border-radius: 7px; background: transparent; color: #9b9b9c; cursor: pointer;
+      font-size: 12.5px; padding: 0;
     }
-    .item .pin { color: #9b9b9c; background: none; border: 0; cursor: pointer; font-size: 13px; }
-    .item .pin.on { color: #ffc94d; }
-    .item .del { color: #777; }
-    .item .del:hover { color: #ff6b6b; }
+    .iconbtn:hover { background: #2c2c2c; color: #efefef; }
+    .iconbtn.pinned { color: #ffc94d; }
+    .iconbtn.del:hover { background: rgba(255, 90, 90, .13); color: #ff6b6b; }
+    .iconbtn svg { width: 14px; height: 14px; fill: currentColor; }
     .bulk {
-      display: none; align-items: center; gap: 6px; padding: 8px 14px;
+      display: none; align-items: center; gap: 6px; padding: 10px 16px;
       border-top: 1px solid #2a2a2a; background: #191919;
     }
     .bulk.on { display: flex; }
     .bulk span { flex: 1; font-size: 11.5px; color: #9b9b9c; }
     .bulk button {
-      height: 28px; padding: 0 10px; border: 1px solid #3a3a3a; border-radius: 7px;
+      height: 28px; padding: 0 11px; border: 1px solid #3a3a3a; border-radius: 8px;
       background: #1c1c1c; color: #f2f2f2; font-size: 11.5px; cursor: pointer;
     }
-    .bulk button:hover { background: #262626; }
-    .ft { padding: 8px 14px 12px; border-top: 1px solid #2a2a2a; color: #777; font-size: 11px; }
+    .bulk button:hover { background: #282828; }
+    .ft { padding: 10px 16px 12px; border-top: 1px solid #2a2a2a; color: #6f6f70; font-size: 10.5px; }
   `;
+
+  const FOLDER_ICON =
+    '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-8l-2-2z"/></svg>';
 
   const PANEL_HTML = `
     <div class="hd"><b>Lumen Library</b><button class="x" title="close">✕</button></div>
@@ -221,9 +232,8 @@
 
     panel.querySelector('.folders').addEventListener('click', onFoldersClick);
     panel.querySelector('.list').addEventListener('click', onListClick);
-    panel.querySelector('.list').addEventListener('change', onListChange);
 
-    panel.querySelector('.bmove').addEventListener('click', () => bulkApply(selectedFolderId()));
+    panel.querySelector('.bmove').addEventListener('click', () => moveItems(checkedIds()));
     panel.querySelector('.bdel').addEventListener('click', bulkDelete);
   }
 
@@ -277,43 +287,55 @@
       save().then(render);
       return;
     }
+    if (event.target.closest('.move')) {
+      event.stopPropagation();
+      moveItems([convId]);
+      return;
+    }
     if (event.target.closest('.del')) {
       state = CORE.removeChat(state, convId);
       save().then(render);
       return;
     }
-    /* clicks on checkbox/select are handled via change or their own
-       stopPropagation; any other click opens the conversation */
-    if (event.target.closest('input[type=checkbox]') || event.target.closest('select')) return;
+    /* clicks on the checkbox are handled via its own listeners; any other
+       click opens the conversation */
+    if (event.target.closest('input[type=checkbox]')) return;
     window.location.href = '/c/' + convId;
   }
 
-  function onListChange(event) {
-    const select = event.target.closest('select.fassign');
-    if (!select) return;
-    const item = event.target.closest('.item');
-    if (!item) return;
-    state = CORE.setFolder(state, item.dataset.id, select.value || null);
+  /* ══ Move / bulk ════════════════════════════════════════════════════ */
+
+  /**
+   * Moves chats to a folder chosen by name. Empty input unfiles; a new
+   * name creates the folder. Cancel leaves everything untouched.
+   * @param {string[]} ids
+   */
+  function moveItems(ids) {
+    if (!ids.length) return;
+    const names = state.folders.map(f => f.name);
+    const input = prompt(
+      'Move to folder. Existing: ' + (names.join(', ') || 'none') +
+      '. A new name creates the folder. Leave empty to unfile.', '');
+    if (input === null) return;
+    const name = input.trim();
+    let folderId = null;
+    if (name) {
+      const existing = state.folders.find(f => f.name.toLowerCase() === name.toLowerCase());
+      if (existing) {
+        folderId = existing.id;
+      } else {
+        const res = CORE.addFolder(state, name);
+        state = res.state;
+        folderId = res.folderId;
+      }
+    }
+    for (const id of ids) state = CORE.setFolder(state, id, folderId);
     save().then(render);
-  }
-
-  /* ══ Bulk actions ═══════════════════════════════════════════════════ */
-
-  function selectedFolderId() {
-    const on = root.querySelector('.fchip.on');
-    const id = on && on.dataset.folder;
-    return id && id !== '__pinned' ? id : null;
   }
 
   function checkedIds() {
     return [...root.querySelectorAll('.item input[type=checkbox]:checked')]
       .map(cb => cb.dataset.id);
-  }
-
-  function bulkApply(folderId) {
-    const ids = checkedIds();
-    for (const id of ids) state = CORE.setFolder(state, id, folderId);
-    save().then(() => { render(); });
   }
 
   function bulkDelete() {
@@ -365,13 +387,14 @@
       const hasChats = Object.keys(state.chats).length > 0;
       empty.textContent = hasChats
         ? 'No chats match this filter.'
-        : 'No saved chats yet — open a conversation and press “+ current”.';
+        : 'No saved chats yet.\nOpen a conversation and press “+ current”.';
       list.appendChild(empty);
       return;
     }
 
     for (const id of visible) {
       const c = state.chats[id];
+
       const item = document.createElement('div');
       item.className = 'item';
       item.dataset.id = id;
@@ -379,9 +402,18 @@
       const check = document.createElement('input');
       check.type = 'checkbox';
       check.dataset.id = id;
+      check.title = 'Select';
       check.addEventListener('click', e => e.stopPropagation()); /* don't navigate */
       check.addEventListener('change', updateBulkBar);
       item.appendChild(check);
+
+      if (c.pinned) {
+        const star = document.createElement('span');
+        star.className = 'star';
+        star.textContent = '★';
+        star.title = 'Pinned';
+        item.appendChild(star);
+      }
 
       const meta = document.createElement('div');
       meta.className = 'meta';
@@ -394,40 +426,30 @@
       const when = c.added
         ? new Date(c.added).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
         : '';
-      f.textContent = (c.pinned ? '★ ' : '') + (folder ? folder.name : 'Unfiled') +
-        (when ? ' · ' + when : '') +
-        (c.tags.length ? ' · ' + c.tags.join(', ') : '');
+      f.textContent = (folder ? folder.name : 'Unfiled') + (when ? ' · ' + when : '');
       meta.append(t, f);
       item.appendChild(meta);
 
+      const acts = document.createElement('div');
+      acts.className = 'acts';
+
       const pin = document.createElement('button');
-      pin.className = 'pin' + (c.pinned ? ' on' : '');
+      pin.className = 'iconbtn pin' + (c.pinned ? ' pinned' : '');
       pin.textContent = c.pinned ? '★' : '☆';
-      pin.title = 'Pin';
-      item.appendChild(pin);
+      pin.title = c.pinned ? 'Unpin' : 'Pin';
+
+      const move = document.createElement('button');
+      move.className = 'iconbtn move';
+      move.title = 'Move to folder';
+      move.innerHTML = FOLDER_ICON;
 
       const del = document.createElement('button');
-      del.className = 'del';
+      del.className = 'iconbtn del';
       del.textContent = '✕';
       del.title = 'Remove from library';
-      item.appendChild(del);
 
-      const sel = document.createElement('select');
-      sel.className = 'fassign';
-      sel.title = 'Folder';
-      const opt0 = document.createElement('option');
-      opt0.value = '';
-      opt0.textContent = '— folder —';
-      sel.appendChild(opt0);
-      for (const x of state.folders) {
-        const o = document.createElement('option');
-        o.value = x.id;
-        o.textContent = x.name;
-        sel.appendChild(o);
-      }
-      sel.value = c.folderId || '';
-      sel.addEventListener('click', e => e.stopPropagation());
-      item.appendChild(sel);
+      acts.append(pin, move, del);
+      item.appendChild(acts);
 
       list.appendChild(item);
     }
