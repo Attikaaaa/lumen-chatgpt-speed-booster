@@ -88,7 +88,20 @@
     }
     .lumen-ghost:first-child { padding-top: 6px; }
     .lumen-ghost-role { font-size: 12px; font-weight: 600; letter-spacing: .02em; opacity: .55; margin-bottom: 4px; }
-    .lumen-ghost-body { font-size: 15px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; }
+    .lumen-ghost-body { font-size: 15px; line-height: 1.6; }
+    .lumen-ghost-body p { margin: 0 0 8px; }
+    .lumen-ghost-body ul { margin: 6px 0 8px 20px; }
+    .lumen-ghost-body li { margin: 2px 0; }
+    .lumen-ghost-body code {
+      font: 12.5px/1.5 Consolas, monospace;
+      background: rgba(128,128,128,.14); border-radius: 4px; padding: 1px 4px;
+    }
+    .lumen-ghost-body pre {
+      background: rgba(0,0,0,.25); border: 1px solid rgba(128,128,128,.2);
+      border-radius: 8px; padding: 10px 12px; overflow-x: auto; margin: 8px 0;
+    }
+    .lumen-ghost-body pre code { background: transparent; padding: 0; }
+    .lumen-ghost-body a { color: #4db2ff; }
   `;
 
   /* ══ State ══════════════════════════════════════════════════════════ */
@@ -363,8 +376,49 @@
   }
 
   /**
-   * Builds a read-only archive turn. Text-only by design: archived messages
-   * are never re-rendered as live chat bubbles, so formatting is simplified.
+   * Minimal safe markdown renderer for archived messages. Escapes everything
+   * first, then re-adds fenced code, inline code, bold, italic, links and
+   * simple lists. No external content is ever loaded.
+   * @param {string} text
+   * @returns {string} safe HTML
+   */
+  function renderRich(text) {
+    const esc = s => s
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+    const inline = s => s
+      .replace(/`([^`]+)`/g, '<code>$1</code>')
+      .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+      .replace(/\*([^*]+)\*/g, '<em>$1</em>')
+      .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g,
+        '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+
+    const out = [];
+    String(text).split('```').forEach((part, idx) => {
+      if (idx % 2 === 1) {
+        /* fenced code block; first line may carry the language tag */
+        const nl = part.indexOf('\n');
+        const code = nl === -1 ? '' : part.slice(nl + 1);
+        out.push('<pre><code>' + esc(code.replace(/\n$/, '')) + '</code></pre>');
+        return;
+      }
+      part.split(/\n{2,}/).forEach(block => {
+        const lines = block.split('\n').filter(l => l.trim().length);
+        if (lines.length === 0) return;
+        if (lines.every(l => /^\s*[-*] /.test(l))) {
+          out.push('<ul>' + lines.map(l =>
+            '<li>' + inline(esc(l.replace(/^\s*[-*] /, ''))) + '</li>').join('') + '</ul>');
+        } else {
+          out.push('<p>' + lines.map(l => inline(esc(l))).join('<br>') + '</p>');
+        }
+      });
+    });
+    return out.join('');
+  }
+
+  /**
+   * Builds a read-only archive turn: role label + rich (markdown-ish) body,
+   * rendered from escaped text only.
    */
   function buildGhostTurn(item) {
     const wrap = document.createElement('div');
@@ -377,7 +431,7 @@
 
     const body = document.createElement('div');
     body.className = 'lumen-ghost-body';
-    body.textContent = item.text;
+    body.innerHTML = renderRich(item.text);
 
     wrap.append(role, body);
     return wrap;

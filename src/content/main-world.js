@@ -219,6 +219,50 @@
         : src;
     }
 
+    /* Branch-safe: sibling alternates of kept turns (edits / regenerations)
+       stay switchable. Each sibling is kept as a one-level stub — message
+       intact, subtree truncated — so the branch UI keeps working without
+       growing the payload with full alternate subtrees. */
+    const stubsByParent = new Map();
+    const stubList = [];
+    for (let i = 1; i < keptPath.length; i++) {
+      const node = mapping[keptPath[i]];
+      const parentNode = node && node.parent ? mapping[node.parent] : null;
+      if (!parentNode || !Array.isArray(parentNode.children)) continue;
+      for (const sibId of parentNode.children) {
+        if (keptSet.has(sibId) || newMapping[sibId]) continue;
+        const sib = mapping[sibId];
+        if (!sib || !sib.message) continue;
+        if (!stubsByParent.has(node.parent)) stubsByParent.set(node.parent, []);
+        stubsByParent.get(node.parent).push(sibId);
+        stubList.push([sibId, sib]);
+      }
+    }
+    for (const [parentId, ids] of stubsByParent) {
+      const parentNode = newMapping[parentId];
+      if (parentNode) {
+        newMapping[parentId] = Object.assign({}, parentNode, {
+          children: (parentNode.children || []).concat(ids)
+        });
+      }
+    }
+    for (const [sibId, sib] of stubList) {
+      newMapping[sibId] = Object.assign({}, sib, { children: [] });
+    }
+
+    /* Boundary alternates: siblings of the FIRST kept turn hang under a
+       parent outside the window — they become root-level stubs so the
+       branch switcher still offers them without dangling references. */
+    const firstNode = mapping[keptPath[0]];
+    if (firstNode && firstNode.parent && mapping[firstNode.parent]) {
+      for (const sibId of (mapping[firstNode.parent].children || [])) {
+        if (sibId === keptPath[0] || newMapping[sibId] || !mapping[sibId]) continue;
+        const sib = mapping[sibId];
+        if (!sib || !sib.message) continue;
+        newMapping[sibId] = Object.assign({}, sib, { children: [], parent: null });
+      }
+    }
+
     return {
       status,
       json: {
