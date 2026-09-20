@@ -37,7 +37,7 @@
     },
     {
       "matches": ["https://chatgpt.com/*", "https://chat.openai.com/*"],
-      "js": ["src/content/content.js"],
+      "js": ["src/content/content.js", "src/content/library-core.js", "src/content/library.js"],
       "css": ["src/content/content.css"],
       "run_at": "document_idle"
     }
