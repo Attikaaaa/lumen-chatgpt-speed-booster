@@ -1,10 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Lumen</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+
+  <!-- Main view -->
+  <div id="mainView" class="view">
+
+    <header class="lx-header">
+      <div class="lx-brand">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M12 2l1.8 5.6L19 9.4l-4.2 3.6L16 19l-4-3.2L8 19l1.2-6L5 9.4l5.2-1.8L12 2z" stroke="var(--accent)" stroke-width="1.6" stroke-linejoin="round"/>
+        </svg>
+        <span class="lx-name">Lumen</span>
+      </div>
+      <div class="lx-chip" id="statusChip">
+        <span class="lx-dot"></span>
+        <span id="statusText"></span>
+      </div>
+    </header>
+
+    <section class="lx-stats">
+      <div class="lx-stat">
+        <span class="lx-stat-value" id="renderedCount">—</span>
+        <span class="lx-stat-label" data-i18n="renderedLabel"></span>
+      </div>
+      <div class="lx-stat">
+        <span class="lx-stat-value" id="totalCount">—</span>
+        <span class="lx-stat-label" data-i18n="totalLabel"></span>
+      </div>
+      <div class="lx-stat">
+        <span class="lx-stat-value lx-accent" id="memorySaved">—</span>
+        <span class="lx-stat-label" data-i18n="memorySavedLabel"></span>
+      </div>
+    </section>
+    <div class="lx-bar"><div class="lx-bar-fill" id="progressFill"></div></div>
+
+    <section class="lx-section">
+      <div class="lx-row">
+        <span class="lx-label" data-i18n="perfLabel"></span>
+        <label class="lx-switch">
+          <input type="checkbox" id="enabled">
+          <span class="lx-track"></span>
+        </label>
+      </div>
+      <div class="lx-row">
+        <span class="lx-label" data-i18n="profileLabel"></span>
+        <select id="profile" class="lx-select">
+          <option value="auto">Auto</option>
+          <option value="fast">Fast</option>
+          <option value="balanced">Balanced</option>
+          <option value="extreme">Extreme</option>
+          <option value="native">Native</option>
+          <option value="custom">Custom</option>
+        </select>
+      </div>
+      <div class="lx-row">
+        <span class="lx-label" data-i18n="keepLastLabel"></span>
+        <div class="lx-stepper">
+          <button id="limitDec" aria-label="−">
+            <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M1.5 5h7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+          </button>
+          <input id="limitDisplay" type="number" min="2" max="200" value="10">
+          <button id="limitInc" aria-label="+">
+            <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M5 1.5v7M1.5 5h7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+          </button>
+        </div>
+      </div>
+      <div class="lx-row">
+        <span class="lx-label" data-i18n="featInstantScroll"></span>
+        <label class="lx-switch">
+          <input type="checkbox" id="instantScroll">
+          <span class="lx-track"></span>
+        </label>
+      </div>
+      <div class="lx-row">
+        <span class="lx-label" data-i18n="featSidebarOpt"></span>
+        <label class="lx-switch">
+          <input type="checkbox" id="sidebarOptimization">
+          <span class="lx-track"></span>
+        </label>
+      </div>
+      <div class="lx-row">
+        <span class="lx-label" data-i18n="featNoAnimations"></span>
+        <label class="lx-switch">
+          <input type="checkbox" id="disableAnimations">
+          <span class="lx-track"></span>
+        </label>
+      </div>
+      <div class="lx-row">
+        <span class="lx-label" data-i18n="featBlockTrackers"></span>
+        <label class="lx-switch">
+          <input type="checkbox" id="telemetryBlock">
+          <span class="lx-track"></span>
+        </label>
+      </div>
+    </section>
+
+    <footer class="lx-actions">
+      <button id="optimizeNow" class="lx-primary" data-i18n="optimizeNow"></button>
+      <button id="reloadPage" class="lx-icon" aria-label="Reload">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none">
+          <path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v5h-5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </button>
+    </footer>
+
+  </div>
+
+  <!-- Blocked view -->
+  <div id="blockedView" class="view hidden">
+    <div class="lx-blocked">
+      <svg width="40" height="40" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <circle cx="12" cy="12" r="9" stroke="var(--line-strong)" stroke-width="1.5"/>
+        <path d="M6 18L18 6" stroke="var(--line-strong)" stroke-width="1.5" stroke-linecap="round"/>
+      </svg>
+      <p class="lx-blocked-title" data-i18n="notOnChatGPT"></p>
+      <p class="lx-blocked-sub" data-i18n="notOnChatGPTSub"></p>
+    </div>
+  </div>
+
+  <script>
+window.__lumenApi = {
+  i18n: { getMessage: (k, subs) => {
+    const M = {
+      renderedLabel: 'In view', totalLabel: 'Total', memorySavedLabel: 'Hidden',
+      perfLabel: 'Performance', profileLabel: 'Profile', keepLastLabel: 'Keep last',
+      featInstantScroll: 'Instant scroll', featSidebarOpt: 'Optimize sidebar',
+      featNoAnimations: 'Disable animations', featBlockTrackers: 'Block trackers',
+      optimizeNow: 'Optimize', reloadPage: 'Reload page',
+      notOnChatGPT: 'Not a ChatGPT tab', notOnChatGPTSub: 'Open a ChatGPT conversation to use Lumen.',
+      statusActive: 'Active', statusPaused: 'Paused'
+    };
+    let s = (M[k] || '') + '';
+    if (subs) subs.forEach((v, i) => { s = s.replace('$' + (i + 1), v); });
+    return s;
+  }},
+  storage: { sync: { get: async d => d, set: async () => {} } },
+  tabs: {
+    query: async () => [{ id: 1, url: 'https://chatgpt.com/' }],
+    sendMessage: async () => ({ ok: true, renderedMessages: 12, totalMessages: 482, hasOlderMessages: true }),
+    reload: async () => {}
+  }
+};
+</script>
+<script>
 /**
  * Lumen — ChatGPT Speed Booster · popup controller.
  *
  * Reads the active tab, renders live statistics from the content script and
  * wires the controls: master performance toggle, performance profile
  * (auto/fast/balanced/extreme/native/custom), custom message limit,
- * optimize/reload actions. All texts come from chrome.i18n.
+ * optimize/reload actions. All texts come from window.__lumenApi.i18n.
  */
 
 (() => {
@@ -16,13 +166,7 @@
   const DEFAULTS = Object.freeze({
     enabled: true,
     profile: 'auto',
-    customLimit: 10,
-    features: Object.freeze({
-      instantScroll: true,
-      sidebarOptimization: true,
-      telemetryBlock: true,
-      disableAnimations: true
-    })
+    customLimit: 10
   });
 
   /** Bounds for the custom message limit. */
@@ -30,7 +174,7 @@
   const LIMIT_MAX = 200;
 
   /** Settings storage. */
-  const store = chrome.storage.sync || chrome.storage.local;
+  const store = window.__lumenApi.storage.sync || window.__lumenApi.storage.local;
 
   /* ══ Helpers ════════════════════════════════════════════════════════ */
 
@@ -41,7 +185,7 @@
    * @returns {string}
    */
   function t(key, subs) {
-    return chrome.i18n.getMessage(key, subs) || key;
+    return window.__lumenApi.i18n.getMessage(key, subs) || key;
   }
 
   /** Clamps `value` into the [min, max] interval. */
@@ -55,19 +199,12 @@
    * @returns {{enabled: boolean, profile: string, customLimit: number}}
    */
   function sanitize(raw) {
-    const f = raw && typeof raw.features === 'object' ? raw.features : {};
     return {
       enabled: typeof raw.enabled === 'boolean' ? raw.enabled : DEFAULTS.enabled,
       profile: typeof raw.profile === 'string' && PROFILES.includes(raw.profile)
         ? raw.profile
         : DEFAULTS.profile,
-      customLimit: clamp(Number(raw.customLimit) || DEFAULTS.customLimit, LIMIT_MIN, LIMIT_MAX),
-      features: {
-        instantScroll: f.instantScroll !== false,
-        sidebarOptimization: f.sidebarOptimization !== false,
-        telemetryBlock: f.telemetryBlock !== false,
-        disableAnimations: f.disableAnimations !== false
-      }
+      customLimit: clamp(Number(raw.customLimit) || DEFAULTS.customLimit, LIMIT_MIN, LIMIT_MAX)
     };
   }
 
@@ -91,10 +228,10 @@
 
   /**
    * Returns the active tab of the current window.
-   * @returns {Promise<chrome.tabs.Tab | null>}
+   * @returns {Promise<window.__lumenApi.tabs.Tab | null>}
    */
   async function getActiveTab() {
-    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+    const tabs = await window.__lumenApi.tabs.query({ active: true, currentWindow: true });
     return tabs[0] || null;
   }
 
@@ -108,7 +245,7 @@
     if (!tabId) return null;
     try {
       return await Promise.race([
-        chrome.tabs.sendMessage(tabId, message),
+        window.__lumenApi.tabs.sendMessage(tabId, message),
         new Promise(resolve => setTimeout(() => resolve(null), 900))
       ]);
     } catch {
@@ -233,22 +370,6 @@
       if (event.key === 'Enter') event.target.blur();
     });
 
-    /* Feature toggles */
-    const featureBindings = [
-      ['instantScroll', 'instantScroll'],
-      ['sidebarOptimization', 'sidebarOptimization'],
-      ['disableAnimations', 'disableAnimations'],
-      ['telemetryBlock', 'telemetryBlock']
-    ];
-    featureBindings.forEach(([id, key]) => {
-      const box = document.getElementById(id);
-      box.checked = settings.features[key];
-      box.addEventListener('change', async event => {
-        settings.features[key] = event.target.checked;
-        await store.set(settings);
-      });
-    });
-
     /* Optimize now — persist, give the page a beat, then re-trim via reload */
     document.getElementById('optimizeNow').addEventListener('click', async () => {
       await store.set(settings);
@@ -260,7 +381,7 @@
     /* Plain page reload */
     document.getElementById('reloadPage').addEventListener('click', async event => {
       event.currentTarget.disabled = true;
-      if (tabId) await chrome.tabs.reload(tabId);
+      if (tabId) await window.__lumenApi.tabs.reload(tabId);
       window.close();
     });
   }
@@ -284,3 +405,7 @@
 
   init();
 })();
+
+</script>
+</body>
+</html>
