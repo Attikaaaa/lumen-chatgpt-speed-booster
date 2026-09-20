@@ -1,10 +1,10 @@
 /**
  * Lumen — ChatGPT Speed Booster · popup controller.
  *
- * Reads the active tab, renders live statistics from the content script and
- * wires the controls: master performance toggle, performance profile
- * (auto/fast/balanced/extreme/native/custom), custom message limit,
- * optimize/reload actions. All texts come from chrome.i18n.
+ * Controls: master performance toggle (with page reload so an already
+ * trimmed conversation is refetched pristine), performance profile,
+ * custom message limit, four feature toggles, optimize/reload actions.
+ * All texts come from chrome.i18n.
  */
 
 (() => {
@@ -12,7 +12,7 @@
 
   /* ══ Constants ══════════════════════════════════════════════════════ */
 
-  /** Default user settings — mirrored by the service worker. */
+  /* LUMEN-SETTINGS-MODEL-START (keep byte-identical across contexts; tests enforce) */
   const DEFAULTS = Object.freeze({
     enabled: true,
     profile: 'auto',
@@ -24,10 +24,42 @@
       disableAnimations: true
     })
   });
-
-  /** Bounds for the custom message limit. */
-  const LIMIT_MIN = 2;
-  const LIMIT_MAX = 200;
+  const PROFILES = ['auto', 'native', 'fast', 'balanced', 'extreme', 'custom'];
+  const CUSTOM_LIMIT_MIN = 2;
+  const CUSTOM_LIMIT_MAX = 200;
+  const PROFILE_LIMITS = Object.freeze({ fast: 10, balanced: 20, extreme: 5 });
+  const AUTO_NATIVE_MAX = 120;
+  function clampLimit(value) {
+    const n = Math.round(Number(value));
+    return Number.isFinite(n)
+      ? Math.min(CUSTOM_LIMIT_MAX, Math.max(CUSTOM_LIMIT_MIN, n))
+      : DEFAULTS.customLimit;
+  }
+  function sanitizeSettings(raw) {
+    const src = raw && typeof raw === 'object' ? raw : {};
+    const f = src.features && typeof src.features === 'object' ? src.features : {};
+    return {
+      enabled: typeof src.enabled === 'boolean' ? src.enabled : DEFAULTS.enabled,
+      profile: PROFILES.includes(src.profile) ? src.profile : DEFAULTS.profile,
+      customLimit: clampLimit(src.customLimit),
+      features: {
+        instantScroll: f.instantScroll !== false,
+        sidebarOptimization: f.sidebarOptimization !== false,
+        telemetryBlock: f.telemetryBlock !== false,
+        disableAnimations: f.disableAnimations !== false
+      }
+    };
+  }
+  function resolveProfileKeep(profile, customLimit, total) {
+    if (profile === 'native') return Infinity;
+    if (profile === 'auto') {
+      if (total <= AUTO_NATIVE_MAX) return Infinity;
+      return Math.min(40, Math.max(20, Math.round(total / 40)));
+    }
+    if (profile === 'custom') return customLimit;
+    return PROFILE_LIMITS[profile] || customLimit;
+  }
+  /* LUMEN-SETTINGS-MODEL-END */
 
   /** Settings storage. */
   const store = chrome.storage.sync || chrome.storage.local;
@@ -43,35 +75,6 @@
   function t(key, subs) {
     return chrome.i18n.getMessage(key, subs) || key;
   }
-
-  /** Clamps `value` into the [min, max] interval. */
-  function clamp(value, min, max) {
-    return Math.min(max, Math.max(min, value));
-  }
-
-  /**
-   * Type-checks a raw settings object coming from storage.
-   * @param {*} raw
-   * @returns {{enabled: boolean, profile: string, customLimit: number}}
-   */
-  function sanitize(raw) {
-    const f = raw && typeof raw.features === 'object' ? raw.features : {};
-    return {
-      enabled: typeof raw.enabled === 'boolean' ? raw.enabled : DEFAULTS.enabled,
-      profile: typeof raw.profile === 'string' && PROFILES.includes(raw.profile)
-        ? raw.profile
-        : DEFAULTS.profile,
-      customLimit: clamp(Number(raw.customLimit) || DEFAULTS.customLimit, LIMIT_MIN, LIMIT_MAX),
-      features: {
-        instantScroll: f.instantScroll !== false,
-        sidebarOptimization: f.sidebarOptimization !== false,
-        telemetryBlock: f.telemetryBlock !== false,
-        disableAnimations: f.disableAnimations !== false
-      }
-    };
-  }
-
-  const PROFILES = ['auto', 'native', 'fast', 'balanced', 'extreme', 'custom'];
 
   /**
    * True when the URL belongs to a supported ChatGPT host.
@@ -159,7 +162,7 @@
   function renderCustomLimit(customLimit) {
     const display = document.getElementById('limitDisplay');
     display.value = String(customLimit);
-    display.max = String(LIMIT_MAX);
+    display.max = String(CUSTOM_LIMIT_MAX);
   }
 
   /**
@@ -180,51 +183,53 @@
    * @param {number | null} tabId
    */
   async function setupMainView(tabId) {
-    let settings = sanitize(await store.get(DEFAULTS));
+    let settings = sanitizeSettings(await store.get(DEFAULTS));
     renderStatusChip(settings);
     renderCustomLimit(settings.customLimit);
     renderStats(await sendToTab(tabId, { type: 'getStatus' }));
 
-    /* Master performance toggle */
+    /* Master performance toggle. Pausing stops every modification from now
+       on, but a conversation already trimmed in memory cannot be un-trimmed
+       — so the page reloads and ChatGPT refetches its pristine payload.
+       Reloading in both directions keeps the state unambiguous and cannot
+       loop: it only happens from this explicit user action. */
     const toggle = document.getElementById('enabled');
     toggle.checked = settings.enabled;
     toggle.addEventListener('change', async event => {
-      settings = sanitize({ ...settings, enabled: event.target.checked });
+      settings = sanitizeSettings({ ...settings, enabled: event.target.checked });
       await store.set(settings);
       renderStatusChip(settings);
-      renderStats(await sendToTab(tabId, { type: 'getStatus' }));
+      if (tabId) await chrome.tabs.reload(tabId);
+      window.close();
     });
 
     /* Performance profile */
     const profileSelect = document.getElementById('profile');
     profileSelect.value = settings.profile;
     profileSelect.addEventListener('change', async event => {
-      settings = sanitize({ ...settings, profile: event.target.value });
+      settings = sanitizeSettings({ ...settings, profile: event.target.value });
       await store.set(settings);
       await commitSettings(settings, tabId);
     });
 
     /* Custom message limit stepper */
     document.getElementById('limitDec').addEventListener('click', async () => {
-      settings = sanitize({ ...settings, customLimit: clamp(settings.customLimit - 1, LIMIT_MIN, LIMIT_MAX) });
+      settings = sanitizeSettings({ ...settings, customLimit: clampLimit(settings.customLimit - 1) });
       renderCustomLimit(settings.customLimit);
-      await store.set(settings);
       await commitSettings(settings, tabId);
     });
 
     document.getElementById('limitInc').addEventListener('click', async () => {
-      settings = sanitize({ ...settings, customLimit: clamp(settings.customLimit + 1, LIMIT_MIN, LIMIT_MAX) });
+      settings = sanitizeSettings({ ...settings, customLimit: clampLimit(settings.customLimit + 1) });
       renderCustomLimit(settings.customLimit);
-      await store.set(settings);
       await commitSettings(settings, tabId);
     });
 
     const limitInput = document.getElementById('limitDisplay');
     limitInput.addEventListener('blur', async event => {
-      const next = clamp(Number(event.target.value) || settings.customLimit, LIMIT_MIN, LIMIT_MAX);
+      const next = clampLimit(event.target.value);
       if (next !== settings.customLimit) {
-        settings = sanitize({ ...settings, customLimit: next });
-        await store.set(settings);
+        settings = sanitizeSettings({ ...settings, customLimit: next });
         await commitSettings(settings, tabId);
       }
       renderCustomLimit(settings.customLimit);
@@ -233,7 +238,7 @@
       if (event.key === 'Enter') event.target.blur();
     });
 
-    /* Feature toggles */
+    /* Feature toggles — each drives one reversible runtime effect */
     const featureBindings = [
       ['instantScroll', 'instantScroll'],
       ['sidebarOptimization', 'sidebarOptimization'],
@@ -283,4 +288,12 @@
   }
 
   init();
+
+  /* ══ Test hooks (never active in the browser) ═══════════════════════ */
+
+  if (globalThis.__LUMEN_EXPOSE_TEST_HOOKS__) {
+    globalThis.__LUMEN_TEST_POPUP__ = {
+      DEFAULTS, PROFILES, PROFILE_LIMITS, sanitizeSettings, resolveProfileKeep
+    };
+  }
 })();

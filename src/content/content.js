@@ -6,24 +6,27 @@
  *  2. Progressive history: scroll-up reveals mounted turns, then loads
  *     archive chunks (25 msgs) through the main-world worker bridge.
  *  3. Perf style layers, toggled per feature (virtualization / sidebar /
- *     animations) and by the master pause.
+ *     animations) and by the master pause. All performance CSS is dynamic —
+ *     the static stylesheet ships only always-safe archive-turn styles.
  *  4. Settings relay between storage / popup and the main-world bridge.
- *
- * Lumen never injects visible notifications — it runs fully in background.
  */
 
 (() => {
   'use strict';
+
+  /* Guard against double injection (manifest + programmatic). */
+  if (window.__lumenContentLoaded) return;
+  window.__lumenContentLoaded = true;
 
   /* ══ Constants ══════════════════════════════════════════════════════ */
 
   /** localStorage key read by the main-world bridge. */
   const CONFIG_KEY = 'lumen_config_v2';
 
-  /** Default settings — mirrored by the service worker and popup. */
+  /* LUMEN-SETTINGS-MODEL-START (keep byte-identical across contexts; tests enforce) */
   const DEFAULTS = Object.freeze({
     enabled: true,
-    profile: 'auto',                        // auto|native|fast|balanced|extreme|custom
+    profile: 'auto',
     customLimit: 10,
     features: Object.freeze({
       instantScroll: true,
@@ -32,8 +35,42 @@
       disableAnimations: true
     })
   });
-
   const PROFILES = ['auto', 'native', 'fast', 'balanced', 'extreme', 'custom'];
+  const CUSTOM_LIMIT_MIN = 2;
+  const CUSTOM_LIMIT_MAX = 200;
+  const PROFILE_LIMITS = Object.freeze({ fast: 10, balanced: 20, extreme: 5 });
+  const AUTO_NATIVE_MAX = 120;
+  function clampLimit(value) {
+    const n = Math.round(Number(value));
+    return Number.isFinite(n)
+      ? Math.min(CUSTOM_LIMIT_MAX, Math.max(CUSTOM_LIMIT_MIN, n))
+      : DEFAULTS.customLimit;
+  }
+  function sanitizeSettings(raw) {
+    const src = raw && typeof raw === 'object' ? raw : {};
+    const f = src.features && typeof src.features === 'object' ? src.features : {};
+    return {
+      enabled: typeof src.enabled === 'boolean' ? src.enabled : DEFAULTS.enabled,
+      profile: PROFILES.includes(src.profile) ? src.profile : DEFAULTS.profile,
+      customLimit: clampLimit(src.customLimit),
+      features: {
+        instantScroll: f.instantScroll !== false,
+        sidebarOptimization: f.sidebarOptimization !== false,
+        telemetryBlock: f.telemetryBlock !== false,
+        disableAnimations: f.disableAnimations !== false
+      }
+    };
+  }
+  function resolveProfileKeep(profile, customLimit, total) {
+    if (profile === 'native') return Infinity;
+    if (profile === 'auto') {
+      if (total <= AUTO_NATIVE_MAX) return Infinity;
+      return Math.min(40, Math.max(20, Math.round(total / 40)));
+    }
+    if (profile === 'custom') return customLimit;
+    return PROFILE_LIMITS[profile] || customLimit;
+  }
+  /* LUMEN-SETTINGS-MODEL-END */
 
   /** Safety clamp for the mounted turn window. */
   const KEEP_HARD_CAP = 5000;
@@ -50,10 +87,14 @@
   /** Minimum delay between two progressive-load steps. */
   const LOAD_COOLDOWN_MS = 350;
 
+  /** Minimum delay between two archive fetches. */
+  const ARCHIVE_COOLDOWN_MS = 800;
+
+  /** Lifetime cap for injected archive turns. */
+  const GHOST_HARD_CAP = 2000;
+
   /** Class used for injected archive ("ghost") turns. */
   const GHOST_CLASS = 'lumen-ghost';
-
-  const PERF_STYLE_ID = 'lumen-perf-style';
 
   /** Core rendering-cost rules — active while Lumen is enabled. */
   const CORE_CSS = `
@@ -79,34 +120,9 @@
     }
   `;
 
-  /** Archive ("ghost") turn styling — tied to the master switch. */
-  const GHOST_CSS = `
-    .lumen-ghost {
-      max-width: 48rem; margin: 0 auto; padding: 14px 18px;
-      border-bottom: 1px solid rgba(128,128,128,.16);
-      color: inherit; opacity: .94;
-    }
-    .lumen-ghost:first-child { padding-top: 6px; }
-    .lumen-ghost-role { font-size: 12px; font-weight: 600; letter-spacing: .02em; opacity: .55; margin-bottom: 4px; }
-    .lumen-ghost-body { font-size: 15px; line-height: 1.6; }
-    .lumen-ghost-body p { margin: 0 0 8px; }
-    .lumen-ghost-body ul { margin: 6px 0 8px 20px; }
-    .lumen-ghost-body li { margin: 2px 0; }
-    .lumen-ghost-body code {
-      font: 12.5px/1.5 Consolas, monospace;
-      background: rgba(128,128,128,.14); border-radius: 4px; padding: 1px 4px;
-    }
-    .lumen-ghost-body pre {
-      background: rgba(0,0,0,.25); border: 1px solid rgba(128,128,128,.2);
-      border-radius: 8px; padding: 10px 12px; overflow-x: auto; margin: 8px 0;
-    }
-    .lumen-ghost-body pre code { background: transparent; padding: 0; }
-    .lumen-ghost-body a { color: #4db2ff; }
-  `;
-
   /* ══ State ══════════════════════════════════════════════════════════ */
 
-  let settings = structuredClone(DEFAULTS);
+  let settings = sanitizeSettings(DEFAULTS);
 
   /** Latest statistics mirrored from the main-world bridge. */
   let lastStatus = {
@@ -162,28 +178,12 @@
     return Math.min(max, Math.max(min, value));
   }
 
-  /** Applies defaults and type-checks a raw settings object (settings v2). */
-  function sanitize(raw) {
-    const f = raw && typeof raw.features === 'object' ? raw.features : {};
-    return {
-      enabled: typeof raw.enabled === 'boolean' ? raw.enabled : DEFAULTS.enabled,
-      profile: PROFILES.includes(raw.profile) ? raw.profile : DEFAULTS.profile,
-      customLimit: clamp(Number(raw.customLimit) || DEFAULTS.customLimit, 2, 200),
-      features: {
-        instantScroll: f.instantScroll !== false,
-        sidebarOptimization: f.sidebarOptimization !== false,
-        telemetryBlock: f.telemetryBlock !== false,
-        disableAnimations: f.disableAnimations !== false
-      }
-    };
-  }
-
   /**
    * Persists the active config for the main-world bridge, syncs the perf
    * style layers, and notifies the bridge.
    */
   function applySettings(next) {
-    settings = sanitize({ ...settings, ...next });
+    settings = sanitizeSettings({ ...settings, ...next });
     try {
       localStorage.setItem(CONFIG_KEY, JSON.stringify(settings));
     } catch { /* storage full — bridge keeps its previous config */ }
@@ -215,35 +215,26 @@
     setStyleElement('lumen-perf-core', on ? CORE_CSS : null);
     setStyleElement('lumen-perf-sidebar', on && f.sidebarOptimization ? SIDEBAR_CSS : null);
     setStyleElement('lumen-perf-visual', on && f.disableAnimations ? VISUAL_CSS : null);
-    setStyleElement('lumen-ghost-style', on ? GHOST_CSS : null);
   }
 
   /* ══ DOM windowing (turn limiter) ═══════════════════════════════════ */
 
   /**
    * Window size for the current conversation state.
-   * Auto profile: small chats stay native, large chats get a proportional
-   * window (20-40 turns). Returns Infinity when no cap should apply.
+   * Delegates to the shared profile model; returns Infinity when no cap
+   * should apply (paused, native, or small auto chats).
    */
   function resolveKeep(domTotal) {
     if (!settings.enabled) return Infinity;
     const total = Math.max(fetchTotal, domTotal);
-
-    switch (settings.profile) {
-      case 'native': return Infinity;
-      case 'auto':
-        if (total <= 120) return Infinity;
-        return clamp(Math.round(total / 40), 20, 40);
-      case 'fast': return 10;
-      case 'balanced': return 20;
-      case 'extreme': return 5;
-      default: return clamp(settings.customLimit, 2, 200);
-    }
+    const keep = resolveProfileKeep(settings.profile, settings.customLimit, total);
+    return Number.isFinite(keep) ? Math.min(keep, KEEP_HARD_CAP) : Infinity;
   }
 
   /**
    * Keeps at most the resolved window of turns mounted-and-visible.
    * Older in-DOM turns are hidden, not removed — React stays consistent.
+   * Turns revealed by scroll-up (revealedExtra) stay visible.
    */
   function applyTurnLimit() {
     const turns = document.querySelectorAll(TURN_SELECTOR);
@@ -260,7 +251,8 @@
     }
 
     const keep = resolveKeep(domTotal);
-    const hideCount = Number.isFinite(keep) ? Math.max(0, domTotal - keep) : 0;
+    const effectiveKeep = Number.isFinite(keep) ? Math.min(keep + revealedExtra, KEEP_HARD_CAP) : keep;
+    const hideCount = Number.isFinite(effectiveKeep) ? Math.max(0, domTotal - effectiveKeep) : 0;
 
     if (domTotal !== appliedDomTotal || hideCount !== appliedHideCount) {
       for (let i = 0; i < domTotal; i++) {
@@ -375,50 +367,115 @@
     });
   }
 
+  /* ══ Rich (markdown-ish) ghost rendering — DOM-API only ═════════════ */
+
+  /* Message text is NEVER treated as HTML: every text fragment lands in a
+     text node, elements are created with createElement, links go through
+     URL validation (http/https only) and receive fixed attributes. */
+
+  /** Tokenizer for inline markdown: code, bold, italic, links. */
+  const INLINE_TOKEN = /(`([^`]+)`)|(\*\*([^*]+)\*\*)|(\*([^*]+)\*)|(\[([^\]]+)\]\(([^)\s]+)\))/g;
+
   /**
-   * Minimal safe markdown renderer for archived messages. Escapes everything
-   * first, then re-adds fenced code, inline code, bold, italic, links and
-   * simple lists. No external content is ever loaded.
-   * @param {string} text
-   * @returns {string} safe HTML
+   * Builds a link element for [label](url); non-http(s) or malformed URLs
+   * render as inert text (no href attribute at all).
    */
-  function renderRich(text) {
-    const esc = s => s
-      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  function createSafeLink(doc, label, rawUrl) {
+    const a = doc.createElement('a');
+    a.textContent = label;
+    try {
+      const parsed = new URL(rawUrl);
+      if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+        a.setAttribute('href', parsed.href);
+        a.setAttribute('target', '_blank');
+        a.setAttribute('rel', 'noopener noreferrer');
+      }
+    } catch { /* not a URL — stays inert text */ }
+    return a;
+  }
 
-    const inline = s => s
-      .replace(/`([^`]+)`/g, '<code>$1</code>')
-      .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-      .replace(/\*([^*]+)\*/g, '<em>$1</em>')
-      .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g,
-        '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+  /**
+   * Appends the inline-markdown rendering of `text` to `parent` using
+   * createElement/createTextNode exclusively.
+   */
+  function appendInlineMarkdown(doc, parent, text) {
+    const re = new RegExp(INLINE_TOKEN.source, 'g');
+    let last = 0;
+    let match;
+    while ((match = re.exec(text)) !== null) {
+      if (match.index > last) {
+        parent.appendChild(doc.createTextNode(text.slice(last, match.index)));
+      }
+      if (match[2] !== undefined) {
+        const code = doc.createElement('code');
+        code.textContent = match[2];
+        parent.appendChild(code);
+      } else if (match[4] !== undefined) {
+        const strong = doc.createElement('strong');
+        strong.textContent = match[4];
+        parent.appendChild(strong);
+      } else if (match[6] !== undefined) {
+        const em = doc.createElement('em');
+        em.textContent = match[6];
+        parent.appendChild(em);
+      } else if (match[8] !== undefined) {
+        parent.appendChild(createSafeLink(doc, match[8], match[9]));
+      }
+      last = re.lastIndex;
+    }
+    if (last < text.length) {
+      parent.appendChild(doc.createTextNode(text.slice(last)));
+    }
+  }
 
-    const out = [];
+  /**
+   * Renders markdown-ish text into `root` with DOM APIs only. Supported:
+   * paragraphs, fenced code, inline code, bold, italic, simple lists and
+   * safe http/https links. Nothing is ever parsed as HTML.
+   * @param {Element} root  container to fill
+   * @param {string} text   raw message text
+   * @param {Document} [doc] document factory (tests inject a fake)
+   */
+  function renderRichInto(root, text, doc) {
+    const d = doc || document;
     String(text).split('```').forEach((part, idx) => {
       if (idx % 2 === 1) {
         /* fenced code block; first line may carry the language tag */
         const nl = part.indexOf('\n');
-        const code = nl === -1 ? '' : part.slice(nl + 1);
-        out.push('<pre><code>' + esc(code.replace(/\n$/, '')) + '</code></pre>');
+        const code = (nl === -1 ? '' : part.slice(nl + 1)).replace(/\n$/, '');
+        const pre = d.createElement('pre');
+        const codeEl = d.createElement('code');
+        codeEl.textContent = code;
+        pre.appendChild(codeEl);
+        root.appendChild(pre);
         return;
       }
       part.split(/\n{2,}/).forEach(block => {
         const lines = block.split('\n').filter(l => l.trim().length);
         if (lines.length === 0) return;
         if (lines.every(l => /^\s*[-*] /.test(l))) {
-          out.push('<ul>' + lines.map(l =>
-            '<li>' + inline(esc(l.replace(/^\s*[-*] /, ''))) + '</li>').join('') + '</ul>');
+          const ul = d.createElement('ul');
+          lines.forEach(l => {
+            const li = d.createElement('li');
+            appendInlineMarkdown(d, li, l.replace(/^\s*[-*] /, ''));
+            ul.appendChild(li);
+          });
+          root.appendChild(ul);
         } else {
-          out.push('<p>' + lines.map(l => inline(esc(l))).join('<br>') + '</p>');
+          const p = d.createElement('p');
+          lines.forEach((l, i) => {
+            if (i > 0) p.appendChild(d.createElement('br'));
+            appendInlineMarkdown(d, p, l);
+          });
+          root.appendChild(p);
         }
       });
     });
-    return out.join('');
   }
 
   /**
    * Builds a read-only archive turn: role label + rich (markdown-ish) body,
-   * rendered from escaped text only.
+   * rendered from DOM text nodes only.
    */
   function buildGhostTurn(item) {
     const wrap = document.createElement('div');
@@ -431,7 +488,7 @@
 
     const body = document.createElement('div');
     body.className = 'lumen-ghost-body';
-    body.innerHTML = renderRich(item.text);
+    renderRichInto(body, item.text);
 
     wrap.append(role, body);
     return wrap;
@@ -491,13 +548,15 @@
 
       const result = await requestExtract(archive.cacheText, skip, HISTORY_CHUNK);
       if (!result) return;
-      const { items, reachedStart, consumedCount } = result;
 
-      if (items.length === 0 || consumedCount === 0) {
+      /* Exhaustion means the traversal made no progress. A chunk full of
+         non-text turns still advanced (consumedCount > 0) — pagination
+         must continue, only the rendered ghosts are zero. */
+      if (!result.consumedCount) {
         archive.exhausted = true;
         return;
       }
-      archive.consumed += consumedCount;
+      archive.consumed += result.consumedCount;
 
       const firstTurn = document.querySelector(TURN_SELECTOR);
       const container = firstTurn && firstTurn.parentElement;
@@ -505,9 +564,9 @@
 
       const heightBefore = document.documentElement.scrollHeight;
       const fragment = document.createDocumentFragment();
-      items.forEach(item => fragment.appendChild(buildGhostTurn(item)));
+      result.items.forEach(item => fragment.appendChild(buildGhostTurn(item)));
       container.insertBefore(fragment, container.firstChild);
-      archive.injected += items.length;
+      archive.injected += result.items.length;
 
       /* Keep the viewport anchored — never fight a bottom-anchored view. */
       const delta = document.documentElement.scrollHeight - heightBefore;
@@ -518,7 +577,7 @@
         window.scrollBy(0, delta);
       }
 
-      if (reachedStart || consumedCount < HISTORY_CHUNK || archive.injected >= GHOST_HARD_CAP) {
+      if (result.reachedStart || archive.injected >= GHOST_HARD_CAP) {
         archive.exhausted = true;
       }
     } catch {
@@ -541,7 +600,7 @@
     /* Step 1 — reveal DOM turns hidden by the window (instant, free). */
     const domTotal = document.querySelectorAll(TURN_SELECTOR).length;
     const keep = resolveKeep(domTotal);
-    const domHidden = Number.isFinite(keep) ? Math.max(0, domTotal - keep) : 0;
+    const domHidden = Number.isFinite(keep) ? Math.max(0, domTotal - keep - revealedExtra) : 0;
     if (domHidden > 0) {
       revealedExtra += Math.min(HISTORY_CHUNK, domHidden);
       queueTurnLimit();
@@ -599,6 +658,7 @@
           extractWaits.delete(event.data.reqId);
           waiter({
             items: event.data.items || [],
+            consumedCount: Number(event.data.consumedCount) || 0,
             reachedStart: !!event.data.reachedStart
           });
         }
@@ -665,4 +725,14 @@
   }
 
   init();
+
+  /* ══ Test hooks (never active in the browser) ═══════════════════════ */
+
+  if (globalThis.__LUMEN_EXPOSE_TEST_HOOKS__) {
+    globalThis.__LUMEN_TEST_CONTENT__ = {
+      DEFAULTS, PROFILES, PROFILE_LIMITS,
+      sanitizeSettings, resolveProfileKeep, renderRichInto,
+      HISTORY_CHUNK, GHOST_HARD_CAP, TURN_SELECTOR, GHOST_CLASS
+    };
+  }
 })();

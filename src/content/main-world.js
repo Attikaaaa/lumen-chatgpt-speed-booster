@@ -17,19 +17,57 @@
   /** localStorage key under which the content script publishes the config. */
   const CONFIG_KEY = 'lumen_config_v2';
 
-  /** Default configuration (mirrors the popup's defaults). */
+  /* LUMEN-SETTINGS-MODEL-START (keep byte-identical across contexts; tests enforce) */
   const DEFAULTS = Object.freeze({
     enabled: true,
     profile: 'auto',
     customLimit: 10,
-    features: Object.freeze({ instantScroll: true, disableAnimations: true })
+    features: Object.freeze({
+      instantScroll: true,
+      sidebarOptimization: true,
+      telemetryBlock: true,
+      disableAnimations: true
+    })
   });
+  const PROFILES = ['auto', 'native', 'fast', 'balanced', 'extreme', 'custom'];
+  const CUSTOM_LIMIT_MIN = 2;
+  const CUSTOM_LIMIT_MAX = 200;
+  const PROFILE_LIMITS = Object.freeze({ fast: 10, balanced: 20, extreme: 5 });
+  const AUTO_NATIVE_MAX = 120;
+  function clampLimit(value) {
+    const n = Math.round(Number(value));
+    return Number.isFinite(n)
+      ? Math.min(CUSTOM_LIMIT_MAX, Math.max(CUSTOM_LIMIT_MIN, n))
+      : DEFAULTS.customLimit;
+  }
+  function sanitizeSettings(raw) {
+    const src = raw && typeof raw === 'object' ? raw : {};
+    const f = src.features && typeof src.features === 'object' ? src.features : {};
+    return {
+      enabled: typeof src.enabled === 'boolean' ? src.enabled : DEFAULTS.enabled,
+      profile: PROFILES.includes(src.profile) ? src.profile : DEFAULTS.profile,
+      customLimit: clampLimit(src.customLimit),
+      features: {
+        instantScroll: f.instantScroll !== false,
+        sidebarOptimization: f.sidebarOptimization !== false,
+        telemetryBlock: f.telemetryBlock !== false,
+        disableAnimations: f.disableAnimations !== false
+      }
+    };
+  }
+  function resolveProfileKeep(profile, customLimit, total) {
+    if (profile === 'native') return Infinity;
+    if (profile === 'auto') {
+      if (total <= AUTO_NATIVE_MAX) return Infinity;
+      return Math.min(40, Math.max(20, Math.round(total / 40)));
+    }
+    if (profile === 'custom') return customLimit;
+    return PROFILE_LIMITS[profile] || customLimit;
+  }
+  /* LUMEN-SETTINGS-MODEL-END */
 
   /** Absolute ceiling for kept messages — a safety clamp, not a feature. */
   const KEEP_HARD_CAP = 5000;
-
-  /** Auto profile: chats at or below this size stay fully native. */
-  const AUTO_NATIVE_MAX = 120;
 
   /** Identifies every postMessage emitted by this script. */
   const MESSAGE_SOURCE = 'lumen_main';
@@ -53,44 +91,12 @@
 
   /* ══ Generic helpers ════════════════════════════════════════════════ */
 
-  /** Clamps `value` into the [min, max] interval. */
-  function clamp(value, min, max) {
-    return Math.min(max, Math.max(min, value));
-  }
-
-  /** Applies defaults and type-checks a raw settings object. */
-  function sanitize(raw) {
-    const f = raw && typeof raw.features === 'object' ? raw.features : {};
-    return {
-      enabled: typeof raw.enabled === 'boolean' ? raw.enabled : DEFAULTS.enabled,
-      profile: typeof raw.profile === 'string' ? raw.profile : DEFAULTS.profile,
-      customLimit: clamp(Number(raw.customLimit) || DEFAULTS.customLimit, 2, 200),
-      features: {
-        instantScroll: f.instantScroll !== false,
-        disableAnimations: f.disableAnimations !== false
-      }
-    };
-  }
-
-  /** Counts visible user/assistant messages in a parsed payload. */
-  function countBubbles(payload) {
-    if (!payload || typeof payload !== 'object' || !payload.mapping || !payload.current_node) return 0;
-    const path = buildPath(payload.mapping, payload.current_node);
-    return path.filter(id => isVisibleMessage(payload.mapping[id])).length;
-  }
-
-  /** Window size for the auto profile, derived from the message count. */
-  function autoKeep(total) {
-    if (total <= AUTO_NATIVE_MAX) return KEEP_HARD_CAP; /* keep everything */
-    return clamp(Math.round(total / 40), 20, 40);
-  }
-
   /** Reads the configuration published by the isolated content script. */
   function loadSettings() {
     try {
       const raw = localStorage.getItem(CONFIG_KEY);
       if (!raw) return { ...DEFAULTS };
-      return sanitize(JSON.parse(raw));
+      return sanitizeSettings(JSON.parse(raw));
     } catch {
       return { ...DEFAULTS };
     }
@@ -152,6 +158,19 @@
       id = mapping[id].parent;
     }
     return path;
+  }
+
+  /** Counts visible user/assistant messages in a parsed payload. */
+  function countBubbles(payload) {
+    if (!payload || typeof payload !== 'object' || !payload.mapping || !payload.current_node) return 0;
+    const path = buildPath(payload.mapping, payload.current_node);
+    return path.filter(id => isVisibleMessage(payload.mapping[id])).length;
+  }
+
+  /** Window size for the auto profile, derived from the message count. */
+  function autoKeep(total) {
+    const adaptive = resolveProfileKeep('auto', 0, total);
+    return Number.isFinite(adaptive) ? adaptive : KEEP_HARD_CAP;
   }
 
   /**
@@ -282,7 +301,7 @@
    * @param {*} payload parsed conversation response
    * @param {number} skip  how many newest messages to skip
    * @param {number} count how many messages to return
-   * @returns {{items: Array<{role: string, text: string}>, reachedStart: boolean} | null}
+   * @returns {{items: Array<{role: string, text: string}>, consumedCount: number, reachedStart: boolean} | null}
    */
   function extractSlice(payload, skip, count) {
     if (!payload || typeof payload !== 'object' || !payload.mapping || !payload.current_node) {
@@ -349,7 +368,12 @@
             if (data.mode === 'extract') {
               const out = extractSlice(JSON.parse(data.text), data.skip, data.count);
               if (!out) { self.postMessage({ id: data.id, ok: true, missing: true }); return; }
-              self.postMessage({ id: data.id, ok: true, items: out.items, reachedStart: out.reachedStart });
+              self.postMessage({
+                id: data.id, ok: true,
+                items: out.items,
+                consumedCount: out.consumedCount,
+                reachedStart: out.reachedStart
+              });
               return;
             }
             const parsed = JSON.parse(data.text);
@@ -370,7 +394,7 @@
           }
         };
       `;
-      const source = [clamp, isMessageNode, isVisibleMessage, buildPath, countBubbles, autoKeep, trimWithKeep, extractSlice]
+      const source = [clampLimit, sanitizeSettings, resolveProfileKeep, isMessageNode, isVisibleMessage, buildPath, countBubbles, autoKeep, trimWithKeep, extractSlice]
         .map(fn => fn.toString())
         .join('\n') + '\n' + handler;
 
@@ -473,15 +497,22 @@
         return originalFetch(...args);
       }
 
+      /* Native profile: the pristine Response passes through without even
+         being parsed — Lumen never touches the conversation payload. */
+      if (settings.profile === 'native') {
+        return originalFetch(...args);
+      }
+
       const response = await originalFetch(...args);
 
       try {
         const text = await response.clone().text();
 
         /* Auto profile: the worker counts bubbles after parsing and picks
-           a proportional window (20-40). Other profiles use a fixed keep. */
+           a proportional window (20-40). Other profiles use fixed keeps
+           resolved from the shared profile model. */
         const auto = settings.profile === 'auto';
-        const keep = auto ? 20 : clamp(settings.customLimit, 2, KEEP_HARD_CAP);
+        const keep = auto ? 0 : resolveProfileKeep(settings.profile, settings.customLimit, 0);
         const trimmed = await trimViaWorker(text, keep, auto);
 
         if (!trimmed) {
@@ -580,7 +611,7 @@
   window.addEventListener('lumen-config', event => {
     const incoming = event && event.detail ? event.detail : null;
     if (!incoming || typeof incoming !== 'object') return;
-    settings = sanitize({ ...settings, ...incoming });
+    settings = sanitizeSettings({ ...settings, ...incoming });
     applyScrollPatch(settings.enabled && settings.features.instantScroll);
     postStatus({ active: Boolean(settings.enabled) });
   });
@@ -588,8 +619,6 @@
   window.addEventListener('lumen-request-status', () => {
     postStatus({});
   });
-
-  /* ══ Config bridge (isolated world → here) ══════════════════════════ */
 
   /* Archive-slice requests from the content script run through the same
      worker, keeping heavy JSON.parse off the page's main thread. */
@@ -605,7 +634,9 @@
         const out = extractSlice(payload, d.skip, d.count);
         window.postMessage({
           source: MESSAGE_SOURCE, type: 'lumen-extract-response', reqId: d.reqId,
-          items: out ? out.items : [], reachedStart: out ? out.reachedStart : true
+          ok: true, items: out ? out.items : [],
+          consumedCount: out ? out.consumedCount : 0,
+          reachedStart: out ? out.reachedStart : true
         }, location.origin);
       } catch { /* malformed payload — requester treats empty as exhausted */ }
       return;
@@ -615,7 +646,9 @@
     trimJobs.set(id, result => {
       window.postMessage({
         source: MESSAGE_SOURCE, type: 'lumen-extract-response', reqId: d.reqId,
-        ok: result.ok, items: result.items || [], reachedStart: !!result.reachedStart
+        ok: result.ok, items: result.items || [],
+        consumedCount: Number(result.consumedCount) || 0,
+        reachedStart: !!result.reachedStart
       }, location.origin);
     });
     trimWorker.postMessage({ id, mode: 'extract', text: d.text, skip: d.skip, count: d.count });
@@ -626,4 +659,16 @@
   applyScrollPatch(settings.enabled && settings.features.instantScroll);
   patchFetch();
   postStatus({});
+
+  /* ══ Test hooks (never active in the browser) ═══════════════════════ */
+
+  if (globalThis.__LUMEN_EXPOSE_TEST_HOOKS__) {
+    globalThis.__LUMEN_TEST__ = {
+      DEFAULTS, PROFILES, PROFILE_LIMITS, CUSTOM_LIMIT_MIN, CUSTOM_LIMIT_MAX,
+      AUTO_NATIVE_MAX, KEEP_HARD_CAP,
+      clampLimit, sanitizeSettings, resolveProfileKeep,
+      trimWithKeep, extractSlice, countBubbles, autoKeep,
+      isConversationGet, trimSync
+    };
+  }
 })();

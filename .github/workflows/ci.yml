@@ -15,18 +15,14 @@ jobs:
         with:
           node-version: 20
 
-      - name: Syntax check (all JS)
+      - name: Syntax check (all shipped JS)
         run: |
           node --check src/background/service-worker.js
           node --check src/content/main-world.js
           node --check src/content/content.js
+          node --check src/content/library-core.js
+          node --check src/content/library.js
           node --check src/popup/popup.js
 
-      - name: Manifest integrity audit
-        run: node test/manifest.test.mjs
-
-      - name: DNR initiator-scope audit
-        run: node test/dnr-scope.test.mjs
-
-      - name: Pagination regression test
-        run: node test/pagination.test.mjs
+      - name: Run every test (auto-discovered)
+        run: node test/run-all.mjs

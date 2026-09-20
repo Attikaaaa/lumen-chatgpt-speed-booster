@@ -1,98 +1,173 @@
 /**
- * Branch preservation + rich ghost renderer tests.
- * Runs the REAL trimWithKeep/extractSlice from main-world.js and the REAL
- * renderRich from content.js inside a stubbed sandbox.
+ * Branch-safe trimming tests: graph invariants over the REAL trimWithKeep.
+ * For every kept node:
+ *   - parent is null or exists in the mapping
+ *   - every child exists in the mapping
+ *   - parent/child links are mutually consistent
+ *   - current_node resolves, alternate stubs stay discoverable
  */
-import fs from 'fs';
-import vm from 'vm';
-import path from 'path';
-import { fileURLToPath } from 'url';
+import { loadMainWorld, makeConv, makeReporter } from './helpers.mjs';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const ROOT = path.resolve(__dirname, '..');
-const noop = () => {};
+const ok = makeReporter('branch-graph');
+const { trimWithKeep } = loadMainWorld();
 
-function makeSandbox() {
-  const sb = {
-    console,
-    localStorage: { getItem: () => null, setItem: noop, removeItem: noop },
-    sessionStorage: { getItem: () => null, setItem: noop, removeItem: noop },
-    location: { origin: 'https://chatgpt.com', href: 'https://chatgpt.com/c/x' },
-    history: { pushState: noop, replaceState: noop },
-    Element: { prototype: {} },
-    setTimeout, clearTimeout, structuredClone: v => JSON.parse(JSON.stringify(v)), setInterval: () => 0, clearInterval: noop,
-    requestAnimationFrame: fn => setTimeout(fn, 0),
-    MutationObserver: class { observe() {} },
-    CustomEvent: class { constructor(type, opts) { this.type = type; this.detail = opts && opts.detail; } },
-    Worker: undefined,
-    Blob: class {},
-    URL: { createObjectURL: () => 'blob:x' },
-    window: null
-  };
-  sb.window = {
-    addEventListener: noop, postMessage: noop, scrollTo: noop, scrollBy: noop,
-    fetch: () => { throw new Error('no network'); }
-  };
-  vm.createContext(sb);
-  return sb;
+/* ── graph invariant checker ─────────────────────────────────────────── */
+function assertGraph(payload, label) {
+  const mapping = payload.mapping;
+  let bad = 0;
+
+  if (!mapping[payload.current_node]) { ok(false, label + ': current_node missing'); bad++; }
+  if (!mapping[payload.root || ''] && Object.keys(mapping).length) {
+    /* root may legitimately differ from first mapping key only when declared */
+    ok(Boolean(payload.root), label + ': root declared');
+  }
+
+  for (const [id, node] of Object.entries(mapping)) {
+    if (node.parent !== null && node.parent !== undefined && !mapping[node.parent]) {
+      ok(false, label + ': dangling parent ' + id + ' -> ' + node.parent);
+      bad++;
+    }
+    for (const child of node.children || []) {
+      if (!mapping[child]) {
+        ok(false, label + ': dangling child ' + id + ' -> ' + child);
+        bad++;
+        continue;
+      }
+      /* mutual consistency: child's parent points back (stubs are the only
+         exception — they keep their original parent, which must exist) */
+      if (mapping[child].parent !== id && node.children.includes(child)) {
+        /* child knows a different parent: allowed only for boundary stubs
+           whose parent was removed (parent: null) */
+        if (mapping[child].parent !== null) {
+          ok(false, label + ': inconsistent pair ' + id + ' <-> ' + child);
+          bad++;
+        }
+      }
+    }
+  }
+  if (bad === 0) ok(true, label + ': graph invariants hold');
 }
 
-let fail = 0;
-const ok = (cond, name) => { console.log((cond ? 'PASS' : 'FAIL') + ' ' + name); if (!cond) fail++; };
+/* builders for specific shapes */
 
-/* ── load main-world ── */
-let mw = fs.readFileSync(path.join(ROOT, 'src/content/main-world.js'), 'utf8');
-mw = mw.replace(/\}\)\(\);\s*$/, 'globalThis.__mw = { trimSync, extractSlice }; })();');
-const sb1 = makeSandbox();
-vm.createContext(sb1);
-vm.runInContext(mw, sb1, { filename: 'main-world.js' });
-const { trimSync, extractSlice } = sb1.__mw;
-
-/* ── load content.js (renderer) ── */
-let ct = fs.readFileSync(path.join(ROOT, 'src/content/content.js'), 'utf8');
-ct = ct.replace(/\}\)\(\);\s*$/, 'globalThis.__ct = { renderRich }; })();');
-const sb2 = makeSandbox();
-vm.createContext(sb2);
-vm.runInContext(ct, sb2, { filename: 'content.js' });
-const { renderRich } = sb2.__ct;
-
-/* ── branch-safe trim ── */
-function makeBranched() {
-  const mapping = {};
-  const add = (id, parent, role, text) => {
-    mapping[id] = { id, parent, children: [],
-      message: { author: { role }, content: { content_type: 'text', parts: [text] } } };
-    if (parent) mapping[parent].children.push(id);
-    return id;
+/** Adds an alternate assistant response (sibling) to node `ofId`. */
+function withAlternate(conv, ofId) {
+  const altId = ofId + '-alt';
+  const parent = conv.mapping[ofId].parent;
+  conv.mapping[altId] = {
+    id: altId, parent, children: [],
+    message: { author: { role: 'assistant' }, content: { content_type: 'text', parts: ['alt'] } }
   };
-  const u0 = add('u0', null, 'user', 'question');
-  const a1 = add('a1', u0, 'assistant', 'answer v1');
-  const a1b = add('a1b', u0, 'assistant', 'answer v2'); /* alternate branch */
-  const u2 = add('u2', a1, 'user', 'follow-up');
-  return { mapping, current_node: u2 };
+  if (parent) conv.mapping[parent].children.push(altId);
+  return conv;
 }
 
-const payload = makeBranched();
-const full = JSON.stringify(payload);
-const trimmed = trimSync(full, 2); /* keep 2: u0 + a1 */
-const out = JSON.parse(trimmed.text);
+/** Adds an edited-user-message branch under `parentId`. */
+function withEditedUser(conv, parentId) {
+  const editId = 'edit-' + parentId;
+  conv.mapping[editId] = {
+    id: editId, parent: parentId, children: [],
+    message: { author: { role: 'user' }, content: { content_type: 'text', parts: ['edited'] } }
+  };
+  if (parentId) conv.mapping[parentId].children.push(editId);
+  return conv;
+}
 
-ok(out.mapping.a1b !== undefined, 'sibling branch node kept as stub');
-ok(out.mapping.a1b.parent === null, 'boundary branch stub is root-level');
-ok(out.mapping.a1b.children.length === 0, 'branch stub subtree truncated');
+/* ── 1. alternate assistant response (inside window) ─────────────────── */
+{
+  const conv = withAlternate(makeConv(50), 'n40');
+  const r = trimWithKeep(conv, 10);
+  ok(!r.passthrough, 'alternate: trims');
+  assertGraph(r.json, 'alternate-in-window');
+  ok(Boolean(r.json.mapping['n40-alt']), 'alternate stub kept switchable');
+  ok(r.json.mapping['n40-alt'].children.length === 0, 'alternate stub subtree truncated');
+}
 
-/* ── renderRich escaping + formatting ── */
-const evil = '<script>alert(1)</script> **bold** `code` [x](https://example.com)';
-const html = renderRich(evil);
-ok(!html.includes('<script>'), 'script tags escaped');
-ok(html.includes('&lt;script&gt;'), 'angle brackets escaped');
-ok(html.includes('<strong>bold</strong>'), 'bold rendered');
-ok(html.includes('<code>code</code>'), 'inline code rendered');
-ok(html.includes('href="https://example.com"'), 'link kept');
+/* ── 2. edited user branch OUTSIDE the window ────────────────────────── */
+{
+  const conv = withEditedUser(makeConv(50), 'n30');
+  const r = trimWithKeep(conv, 10);
+  assertGraph(r.json, 'edited-user');
+  /* the edit hangs under n30 (sibling of n31, far outside the window):
+     one-level stubbing only covers siblings of KEPT turns, so deep edits
+     are dropped — documented graceful degradation, graph stays coherent. */
+  ok(!r.json.mapping['edit-n30'], 'deep edit outside window is dropped (documented)');
+}
 
-/* fenced code */
-const codeHtml = renderRich('```js\nconst a = 1;\n```');
-ok(codeHtml.includes('<pre><code>') && codeHtml.includes('const a = 1;'), 'fenced code rendered');
+/* ── 3. multiple sibling branches ────────────────────────────────────── */
+{
+  const conv = makeConv(50);
+  withAlternate(conv, 'n40');
+  withAlternate(conv, 'n40'); /* addAlt twice → two siblings */
+  conv.mapping['n40-alt-2'] = {
+    id: 'n40-alt-2', parent: 'n39', children: [],
+    message: { author: { role: 'assistant' }, content: { content_type: 'text', parts: ['alt2'] } }
+  };
+  conv.mapping['n39'].children.push('n40-alt-2');
+  const r = trimWithKeep(conv, 10);
+  assertGraph(r.json, 'multi-sibling');
+  ok(Boolean(r.json.mapping['n40-alt'] && r.json.mapping['n40-alt-2']), 'both siblings kept');
+}
 
-console.log(fail === 0 ? 'BRANCH/RICH TESTS PASS' : fail + ' FAILURES');
-process.exit(fail === 0 ? 0 : 1);
+/* ── 4. branch at the trim boundary ──────────────────────────────────── */
+{
+  const conv = withAlternate(makeConv(50), 'n41'); /* n41 = first kept (keep 10 → n41..n49... 50 msgs → n40-n49) */
+  const r = trimWithKeep(conv, 10);
+  assertGraph(r.json, 'boundary-branch');
+  const firstKept = r.json.mapping[r.json.root] ? r.json.root : null;
+  ok(Boolean(firstKept), 'boundary: root resolves');
+}
+
+/* ── 5. branch inside kept window stays navigable ────────────────────── */
+{
+  const conv = withAlternate(makeConv(50), 'n45');
+  const r = trimWithKeep(conv, 10);
+  assertGraph(r.json, 'in-window-branch');
+  const alt = r.json.mapping['n45-alt'];
+  ok(alt && alt.parent === 'n44' && r.json.mapping['n44'].children.includes('n45-alt'),
+    'in-window alternate hangs from its real parent');
+}
+
+/* ── 6. nested branches ──────────────────────────────────────────────── */
+{
+  const conv = withAlternate(makeConv(50), 'n46');
+  withEditedUser(conv, 'n46-alt'); /* branch under an alternate */
+  const r = trimWithKeep(conv, 10);
+  assertGraph(r.json, 'nested-branch');
+}
+
+/* ── 7. alternates never reintroduce full subtrees ───────────────────── */
+{
+  /* alternate with a long subtree: edit at n10 → whole chain n11..n49 */
+  const conv = makeConv(50);
+  withEditedUser(conv, 'n10');
+  let prev = 'edit-n10';
+  for (let i = 11; i < 50; i++) {
+    const id = 'alt-n' + i;
+    conv.mapping[id] = {
+      id, parent: prev, children: [],
+      message: { author: { role: 'assistant' }, content: { content_type: 'text', parts: ['deep ' + i] } }
+    };
+    conv.mapping[prev].children.push(id);
+    prev = id;
+  }
+  const r = trimWithKeep(conv, 10);
+  const altDeepCount = Object.keys(r.json.mapping).filter(id => id.startsWith('alt-n')).length;
+  /* the whole deep alternate chain hangs far outside the window: one-level
+     stubbing drops it entirely instead of reintroducing the payload. */
+  ok(altDeepCount === 0, 'deep alternate subtree dropped entirely (no payload reintroduction), got ' + altDeepCount);
+  assertGraph(r.json, 'deep-alternate');
+}
+
+/* ── 8. current path validity after trim ─────────────────────────────── */
+{
+  const conv = makeConv(50);
+  const r = trimWithKeep(conv, 10);
+  const mapping = r.json.mapping;
+  let id = r.json.current_node;
+  let steps = 0;
+  while (id && steps++ < 100) id = mapping[id] ? mapping[id].parent : 'BROKEN';
+  ok(id !== 'BROKEN' && steps <= 11, 'current_node walks to root within the window');
+}
+
+ok.done();

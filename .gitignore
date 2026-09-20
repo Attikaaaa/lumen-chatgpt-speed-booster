@@ -12,7 +12,11 @@ Thumbs.db
 
 # internal planning (not for release)
 ROADMAP.md
-ROADMAP.md
+
+# demo/render artifacts
 frames/
 *.log
-src/popup/popup-preview.html
+
+# benchmark generated files
+bench/lumen-bench-worker.js
+bench/chrome-tmp-profile/

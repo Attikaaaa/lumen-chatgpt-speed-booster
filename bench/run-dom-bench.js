@@ -1,11 +1,21 @@
 /**
  * Runs the DOM benchmark in real (non-virtual) time: spawns headless Chrome,
  * waits for the LUMEN_DOM result on stderr, then kills the browser.
+ * Chrome location: CHROME_BIN env override, otherwise platform default.
  */
 const { spawn } = require('child_process');
+const path = require('path');
+const fs = require('fs');
 
-const CHROME = 'C:/Program Files/Google/Chrome/Application/chrome.exe';
-const PAGE = 'file:///C:/Users/azrip/AppData/Local/Temp/opencode/bench-dom.html';
+const CHROME =
+  process.env.CHROME_BIN ||
+  (process.platform === 'win32'
+    ? 'C:/Program Files/Google/Chrome/Application/chrome.exe'
+    : process.platform === 'darwin'
+      ? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
+      : 'google-chrome');
+
+const PAGE = 'file:///' + path.resolve(__dirname, 'bench-dom.html').replace(/\\/g, '/');
 
 const proc = spawn(CHROME, [
   '--headless=new',

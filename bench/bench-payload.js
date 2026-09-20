@@ -11,17 +11,17 @@ const vm = require('vm');
 const path = require('path');
 const { Worker } = require('worker_threads');
 
-const EXT = 'C:/Users/azrip/Downloads/ChatGPT-Speed-Booster-Chrome-Web-Store';
+const EXT = path.resolve(__dirname, '..');
 
 /* ── Load the real extension code into a stubbed sandbox ─────────────── */
 let src = fs.readFileSync(path.join(EXT, 'src/content/main-world.js'), 'utf8');
-src = src.replace(/\}\)\(\);\s*$/, 'globalThis.__t={clamp,isMessageNode,isVisibleMessage,buildPath,trimWithKeep,trimSync};})();');
+src = src.replace(/\}\)\(\);\s*$/, 'globalThis.__t={clampLimit,isMessageNode,isVisibleMessage,buildPath,trimWithKeep,trimSync};})();');
 const sandbox = {
   console,
   localStorage: { getItem: () => null, setItem: () => {} },
   sessionStorage: { getItem: () => null, setItem: () => {}, removeItem: () => {} },
   location: { origin: 'https://chatgpt.com', href: 'https://chatgpt.com/c/bench' },
-  history: { pushState: () => {} },
+  history: { pushState: () => {}, replaceState: () => {} },
   Element: { prototype: {} },
   setTimeout, clearTimeout,
   window: null
@@ -75,7 +75,7 @@ function buildPayload(n) {
 /* ── Worker (mirrors the shipped worker: parse+trim+stringify off-thread) */
 const workerSrc = `
 const { parentPort } = require('worker_threads');
-const clamp = ${T.clamp.toString()};
+const clampLimit = ${T.clampLimit.toString()};
 const isMessageNode = ${T.isMessageNode.toString()};
 const isVisibleMessage = ${T.isVisibleMessage.toString()};
 const buildPath = ${T.buildPath.toString()};

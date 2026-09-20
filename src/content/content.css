@@ -1,39 +1,14 @@
 /*
  * Lumen — ChatGPT Speed Booster · content stylesheet.
- * Rendering-cost rules + styling for archive turns loaded on scroll-up.
+ *
+ * This stylesheet contains ONLY always-safe rules: styling for Lumen's own
+ * archive ("ghost") turns. Every performance-dependent rule (turn
+ * virtualization, sidebar optimization, animation disabling) is injected
+ * and removed dynamically by content.js so that the feature toggles and
+ * the master pause can fully revert them.
  */
 
-/* ══ 1. Rendering cost reduction ═══════════════════════════════════════ */
-
-/* Off-screen turns skip layout and paint entirely — the single biggest
-   win for long conversations. */
-article[data-testid^="conversation-turn"] {
-  content-visibility: auto;
-  contain-intrinsic-size: auto 140px;
-  contain: layout style;
-}
-
-/* The sidebar chat list renders only the rows actually on screen. */
-nav li {
-  content-visibility: auto;
-  contain-intrinsic-size: auto 44px;
-}
-
-/* GPU-heavy frosted-glass blur is removed everywhere; transitions no
-   longer delay UI feedback. Keyframe animations (spinners) are kept. */
-* {
-  backdrop-filter: none !important;
-  -webkit-backdrop-filter: none !important;
-  transition: none !important;
-}
-
-/* Programmatic jumps happen instantly (JS-driven smooth scrolling is
-   rewritten at prototype level by the main-world bridge). */
-html {
-  scroll-behavior: auto !important;
-}
-
-/* ══ 2. Archive turns ("ghosts") ═══════════════════════════════════════ */
+/* ══ Archive turns ("ghosts") ═════════════════════════════════════════ */
 
 /* Read-only turns mounted above the thread when older messages are loaded
    on demand. Styled to blend into both ChatGPT themes. */
@@ -63,4 +38,41 @@ html {
   line-height: 1.6;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.lumen-ghost-body p {
+  margin: 0 0 8px;
+}
+
+.lumen-ghost-body ul {
+  margin: 6px 0 8px 20px;
+}
+
+.lumen-ghost-body li {
+  margin: 2px 0;
+}
+
+.lumen-ghost-body code {
+  font: 12.5px/1.5 Consolas, monospace;
+  background: rgba(128, 128, 128, 0.14);
+  border-radius: 4px;
+  padding: 1px 4px;
+}
+
+.lumen-ghost-body pre {
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(128, 128, 128, 0.2);
+  border-radius: 8px;
+  padding: 10px 12px;
+  overflow-x: auto;
+  margin: 8px 0;
+}
+
+.lumen-ghost-body pre code {
+  background: transparent;
+  padding: 0;
+}
+
+.lumen-ghost-body a {
+  color: #4db2ff;
 }

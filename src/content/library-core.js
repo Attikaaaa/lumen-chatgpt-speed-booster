@@ -12,6 +12,9 @@
 (() => {
   'use strict';
 
+  /* Guard against double injection (manifest + programmatic). */
+  if (globalThis.LumenCore) return;
+
   const LumenCore = {};
 
   /** Empty library state. */
@@ -139,7 +142,7 @@
     out.sort((a, b) => {
       const ca = state.chats[a], cb = state.chats[b];
       const pinDiff = (cb.pinned ? 1 : 0) - (ca.pinned ? 1 : 0);
-      if (pinDiff) return -pinDiff;
+      if (pinDiff) return pinDiff;
       return (cb.added || 0) - (ca.added || 0);
     });
     return out;
