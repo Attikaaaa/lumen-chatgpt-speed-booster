@@ -27,13 +27,16 @@
   let filter = { query: '', folderId: null, pinnedOnly: false };
   let host = null;
   let root = null;
+  let btnEl = null;
 
   /* ══ Storage ════════════════════════════════════════════════════════ */
 
   async function load() {
+    console.log("LIB-DEBUG: load start");
     try {
       const data = await chrome.storage.local.get(STORE_KEY);
       state = CORE.sanitize(data[STORE_KEY]);
+      console.log("LIB-DEBUG: loaded chats:", JSON.stringify(Object.keys(state.chats)), "folders:", state.folders.length);
     } catch {
       state = CORE.empty();
     }
@@ -88,7 +91,7 @@
       border-radius: 8px; background: #1c1c1c; color: #f2f2f2; outline: none; font-size: 12.5px;
     }
     .tools input:focus { border-color: #0091ff; }
-    .tools button {
+    .tools button { white-space: nowrap; 
       height: 30px; padding: 0 10px; border: 1px solid #3a3a3a; border-radius: 8px;
       background: #1c1c1c; color: #f2f2f2; cursor: pointer; font-size: 12px;
     }
@@ -141,6 +144,11 @@
     host.style.cssText = 'position:fixed;right:14px;bottom:14px;z-index:2147483000;';
     root = host.attachShadow({ mode: 'open' });
 
+    /* shadow styles — without these the panel renders unstyled */
+    const style = document.createElement('style');
+    style.textContent = CSS;
+    root.appendChild(style);
+
     const btn = document.createElement('button');
     btn.textContent = 'Lumen';
     btn.style.cssText = [
@@ -149,6 +157,7 @@
       'letter-spacing:.08em;cursor:pointer'
     ].join(';');
     btn.addEventListener('click', toggle);
+    btnEl = btn;
     root.appendChild(btn);
 
     const panel = document.createElement('div');
@@ -171,12 +180,21 @@
     document.documentElement.appendChild(host);
 
     panel.querySelector('.x').addEventListener('click', toggle);
-    panel.querySelector('.addcur').addEventListener('click', () => {
+    panel.querySelector('.addcur').addEventListener('click', async () => {
+      const btn = panel.querySelector('.addcur');
+      const onChat = /\/c\/[0-9a-f-]{36}/i.test(location.pathname);
+      if (!onChat) {
+        btn.textContent = 'open a chat first';
+        setTimeout(() => { btn.textContent = '+ current'; }, 1500);
+        return;
+      }
       lastCaptured = '';
       captureCurrent();
       open = true;
       panel.style.display = 'flex';
       render();
+      btn.textContent = '✓ saved';
+      setTimeout(() => { btn.textContent = '+ current'; }, 1200);
     });
     panel.querySelector('.addf').addEventListener('click', () => {
       const name = prompt('Folder name:');
@@ -193,6 +211,14 @@
       bulkApply(selectedFolderId());
     });
     panel.querySelector('.bdel').addEventListener('click', () => bulkDelete());
+  }
+
+  function toggle() {
+    open = !open;
+    ensureHost();
+    root.querySelector('.panel').style.display = open ? 'flex' : 'none';
+    btnEl.style.display = open ? 'none' : 'inline-block';
+    if (open) { captureCurrent(); render(); }
   }
 
   function toggle() {
@@ -276,6 +302,7 @@
   /* ══ Render ═════════════════════════════════════════════════════════ */
 
   function render() {
+    console.log("RENDER-DEBUG start, chats:", JSON.stringify(Object.keys(state.chats)), "folders:", state.folders.length);
     if (!root) return;
     const foldersEl = root.querySelector('.folders');
     const list = root.querySelector('.list');
@@ -293,7 +320,7 @@
     mk('All', null, filter.folderId === null ? 'on' : '');
     mk('★ Pinned', '__pinned', filter.pinnedOnly ? 'on' : '');
     for (const f of state.folders) {
-      const b = mk(f.name + ' ✕', f.id, filter.folderId === f.id ? 'on' : '');
+      const b = mk(f.name, f.id, filter.folderId === f.id ? 'on' : '');
       const del = document.createElement('span');
       del.className = 'fdel';
       del.textContent = '✕';
@@ -344,6 +371,7 @@
       const check = document.createElement('input');
       check.type = 'checkbox';
       check.dataset.id = id;
+      check.addEventListener('click', e => e.stopPropagation()); /* don't navigate */
       check.addEventListener('change', updateBulkBar);
       item.appendChild(check);
 
@@ -364,7 +392,8 @@
       pin.className = 'pin' + (c.pinned ? ' on' : '');
       pin.textContent = c.pinned ? '★' : '☆';
       pin.title = 'Pin';
-      pin.addEventListener('click', () => {
+      pin.addEventListener('click', e => {
+        e.stopPropagation();
         state = CORE.togglePin(state, id);
         save().then(render);
       });
@@ -374,7 +403,8 @@
       del.className = 'pin del';
       del.textContent = '✕';
       del.title = 'Remove from library';
-      del.addEventListener('click', () => {
+      del.addEventListener('click', e => {
+        e.stopPropagation();
         state = CORE.removeChat(state, id);
         save().then(render);
       });
