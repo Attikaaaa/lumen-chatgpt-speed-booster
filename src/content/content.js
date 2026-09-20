@@ -182,9 +182,28 @@
     });
   }
 
+  /** True when the mutation touched a conversation turn element itself —
+      streaming text inside an existing turn is deliberately ignored. */
+  function isTurnMutation(records) {
+    return records.some(record =>
+      [...record.addedNodes].some(isTurnNode) ||
+      [...record.removedNodes].some(isTurnNode)
+    );
+  }
+
+  function isTurnNode(node) {
+    if (!node || node.nodeType !== 1) return false;
+    return (
+      (node.matches && node.matches('[data-testid^="conversation-turn-"]')) ||
+      (node.querySelector && Boolean(node.querySelector('[data-testid^="conversation-turn-"]')))
+    );
+  }
+
   /** Observes DOM changes so the cap holds during streaming and navigation. */
   function setupTurnLimiter() {
-    new MutationObserver(queueTurnLimit).observe(document.documentElement, {
+    new MutationObserver(records => {
+      if (isTurnMutation(records)) queueTurnLimit();
+    }).observe(document.documentElement, {
       childList: true,
       subtree: true
     });
