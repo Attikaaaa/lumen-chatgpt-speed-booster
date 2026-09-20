@@ -1,11 +1,10 @@
 /**
- * Lumen — ChatGPT Speed Booster
- * -----------------------------
- * Popup controller.
+ * Lumen — ChatGPT Speed Booster · popup controller.
  *
  * Reads the active tab, renders live statistics from the content script and
- * wires the controls: booster toggle, message cap, optimize-now and reload.
- * All texts come from chrome.i18n (English / Hungarian locales).
+ * wires the controls: master performance toggle, performance profile
+ * (auto/fast/balanced/extreme/native/custom), custom message limit,
+ * optimize/reload actions. All texts come from chrome.i18n.
  */
 
 (() => {
@@ -13,10 +12,14 @@
 
   /* ══ Constants ══════════════════════════════════════════════════════ */
 
-  /** Default user settings — must mirror the service worker. */
-  const DEFAULTS = Object.freeze({ enabled: true, limit: 10 });
+  /** Default user settings — mirrored by the service worker. */
+  const DEFAULTS = Object.freeze({
+    enabled: true,
+    profile: 'auto',
+    customLimit: 10
+  });
 
-  /** Bounds for the message-cap stepper. */
+  /** Bounds for the custom message limit. */
   const LIMIT_MIN = 2;
   const LIMIT_MAX = 200;
 
@@ -43,14 +46,19 @@
   /**
    * Type-checks a raw settings object coming from storage.
    * @param {*} raw
-   * @returns {{enabled: boolean, limit: number}}
+   * @returns {{enabled: boolean, profile: string, customLimit: number}}
    */
   function sanitize(raw) {
     return {
       enabled: typeof raw.enabled === 'boolean' ? raw.enabled : DEFAULTS.enabled,
-      limit: clamp(Number(raw.limit) || DEFAULTS.limit, LIMIT_MIN, LIMIT_MAX)
+      profile: typeof raw.profile === 'string' && PROFILES.includes(raw.profile)
+        ? raw.profile
+        : DEFAULTS.profile,
+      customLimit: clamp(Number(raw.customLimit) || DEFAULTS.customLimit, LIMIT_MIN, LIMIT_MAX)
     };
   }
+
+  const PROFILES = ['auto', 'native', 'fast', 'balanced', 'extreme', 'custom'];
 
   /**
    * True when the URL belongs to a supported ChatGPT host.
@@ -117,8 +125,6 @@
 
   /**
    * Renders live conversation statistics reported by the content script.
-   * Hero = percentage of the conversation kept out of view; the gauge dot
-   * marks the "in view" position along the full thread.
    * @param {object | null} status
    */
   function renderStats(status) {
@@ -126,26 +132,26 @@
     const total = Number(status && status.totalMessages) || 0;
     const hidden = Math.max(0, total - rendered);
     const hasData = total > 0;
-    const savedPct = hasData ? Math.round((hidden / total) * 100) : 0;
 
-    document.getElementById('memorySaved').textContent = hasData ? `${savedPct}%` : '—';
-    document.getElementById('subLine').textContent = hasData
-      ? `${rendered} ${t('renderedLabel').toLowerCase()} · ${total} ${t('totalLabel').toLowerCase()}`
-      : '—';
-    document.getElementById('gaugeDot').style.left =
-      hasData ? `${Math.round((rendered / total) * 100)}%` : '0%';
+    document.getElementById('renderedCount').textContent = hasData ? String(rendered) : '—';
+    document.getElementById('totalCount').textContent = hasData ? String(total) : '—';
+    document.getElementById('memorySaved').textContent =
+      hasData ? `${Math.round((hidden / total) * 100)}%` : '—';
+
+    const visiblePct = hasData ? Math.round((rendered / total) * 100) : 0;
+    document.getElementById('progressFill').style.width = hasData ? `${visiblePct}%` : '0%';
   }
 
-  /** Syncs the stepper input with the current limit. */
-  function renderLimit(limit) {
-    const display = document.getElementById('limitDisplay');
-    display.value = String(limit);
+  /** Syncs the custom-limit stepper with the stored value. */
+  function renderCustomLimit(customLimit) {
+    const display = document.getElementById('customLimit');
+    display.value = String(customLimit);
     display.max = String(LIMIT_MAX);
   }
 
   /**
    * Persists settings, then refreshes chip + stats from the page.
-   * @param {{enabled: boolean, limit: number}} settings
+   * @param {object} settings
    * @param {number | null} tabId
    */
   async function commitSettings(settings, tabId) {
@@ -163,38 +169,52 @@
   async function setupMainView(tabId) {
     let settings = sanitize(await store.get(DEFAULTS));
     renderStatusChip(settings);
-    renderLimit(settings.limit);
+    renderCustomLimit(settings.customLimit);
     renderStats(await sendToTab(tabId, { type: 'getStatus' }));
 
-    /* Booster toggle */
+    /* Master performance toggle */
     const toggle = document.getElementById('enabled');
     toggle.checked = settings.enabled;
     toggle.addEventListener('change', async event => {
       settings = sanitize({ ...settings, enabled: event.target.checked });
+      await store.set(settings);
+      renderStatusChip(settings);
+      renderStats(await sendToTab(tabId, { type: 'getStatus' }));
+    });
+
+    /* Performance profile */
+    const profileSelect = document.getElementById('profile');
+    profileSelect.value = settings.profile;
+    profileSelect.addEventListener('change', async event => {
+      settings = sanitize({ ...settings, profile: event.target.value });
+      await store.set(settings);
       await commitSettings(settings, tabId);
     });
 
-    /* Message cap stepper */
+    /* Custom message limit stepper */
     document.getElementById('limitDec').addEventListener('click', async () => {
-      settings = sanitize({ ...settings, limit: clamp(settings.limit - 1, LIMIT_MIN, LIMIT_MAX) });
-      renderLimit(settings.limit);
+      settings = sanitize({ ...settings, customLimit: clamp(settings.customLimit - 1, LIMIT_MIN, LIMIT_MAX) });
+      renderCustomLimit(settings.customLimit);
+      await store.set(settings);
       await commitSettings(settings, tabId);
     });
 
     document.getElementById('limitInc').addEventListener('click', async () => {
-      settings = sanitize({ ...settings, limit: clamp(settings.limit + 1, LIMIT_MIN, LIMIT_MAX) });
-      renderLimit(settings.limit);
+      settings = sanitize({ ...settings, customLimit: clamp(settings.customLimit + 1, LIMIT_MIN, LIMIT_MAX) });
+      renderCustomLimit(settings.customLimit);
+      await store.set(settings);
       await commitSettings(settings, tabId);
     });
 
     const limitInput = document.getElementById('limitDisplay');
     limitInput.addEventListener('blur', async event => {
-      const next = clamp(Number(event.target.value) || settings.limit, LIMIT_MIN, LIMIT_MAX);
-      if (next !== settings.limit) {
-        settings = sanitize({ ...settings, limit: next });
+      const next = clamp(Number(event.target.value) || settings.customLimit, LIMIT_MIN, LIMIT_MAX);
+      if (next !== settings.customLimit) {
+        settings = sanitize({ ...settings, customLimit: next });
+        await store.set(settings);
         await commitSettings(settings, tabId);
       }
-      renderLimit(settings.limit);
+      renderCustomLimit(settings.customLimit);
     });
     limitInput.addEventListener('keydown', event => {
       if (event.key === 'Enter') event.target.blur();

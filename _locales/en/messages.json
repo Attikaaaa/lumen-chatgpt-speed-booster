@@ -18,13 +18,28 @@
     "message": "Total"
   },
   "memorySavedLabel": {
-    "message": "Saved"
+    "message": "Hidden"
   },
-  "boosterLabel": {
-    "message": "Speed booster"
+  "perfLabel": {
+    "message": "Performance"
+  },
+  "profileLabel": {
+    "message": "Profile"
   },
   "keepLastLabel": {
     "message": "Keep last"
+  },
+  "featInstantScroll": {
+    "message": "Instant scroll"
+  },
+  "featSidebarOpt": {
+    "message": "Optimize sidebar"
+  },
+  "featNoAnimations": {
+    "message": "Disable animations"
+  },
+  "featBlockTrackers": {
+    "message": "Block trackers"
   },
   "optimizeNow": {
     "message": "Optimize"

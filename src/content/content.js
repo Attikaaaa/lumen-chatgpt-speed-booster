@@ -1,25 +1,41 @@
 /**
  * Lumen — ChatGPT Speed Booster · isolated content script.
- * Caps mounted conversation turns, loads older messages on scroll-up
- * (reveal + on-demand archive), and relays settings/stats. No visible UI.
+ *
+ * Responsibilities:
+ *  1. DOM windowing: keep only the active turn window mounted-and-visible.
+ *  2. Progressive history: scroll-up reveals mounted turns, then loads
+ *     archive chunks (25 msgs) through the main-world worker bridge.
+ *  3. Perf style layers, toggled per feature (virtualization / sidebar /
+ *     animations) and by the master pause.
+ *  4. Settings relay between storage / popup and the main-world bridge.
+ *
+ * Lumen never injects visible notifications — it runs fully in background.
  */
 
 (() => {
   'use strict';
 
-  /* Guard against double injection (manifest + programmatic). */
-  if (window.__lumenContentLoaded) return;
-  window.__lumenContentLoaded = true;
-
   /* ══ Constants ══════════════════════════════════════════════════════ */
 
   /** localStorage key read by the main-world bridge. */
-  const CONFIG_KEY = 'lumen_config_v1';
+  const CONFIG_KEY = 'lumen_config_v2';
 
-  /** Default user settings — mirrored by the service worker. */
-  const DEFAULTS = Object.freeze({ enabled: true, limit: 10 });
+  /** Default settings — mirrored by the service worker and popup. */
+  const DEFAULTS = Object.freeze({
+    enabled: true,
+    profile: 'auto',                        // auto|native|fast|balanced|extreme|custom
+    customLimit: 10,
+    features: Object.freeze({
+      instantScroll: true,
+      sidebarOptimization: true,
+      telemetryBlock: true,
+      disableAnimations: true
+    })
+  });
 
-  /** Safety clamp shared with the main-world bridge. */
+  const PROFILES = ['auto', 'native', 'fast', 'balanced', 'extreme', 'custom'];
+
+  /** Safety clamp for the mounted turn window. */
   const KEEP_HARD_CAP = 5000;
 
   /** Selector for ChatGPT conversation turn elements. */
@@ -27,12 +43,6 @@
 
   /** How many archived messages to reveal / fetch per scroll-up step. */
   const HISTORY_CHUNK = 25;
-
-  /** Safety cap on total archived messages injected in one conversation. */
-  const GHOST_HARD_CAP = 2000;
-
-  /** Minimum delay between two archive fetches. */
-  const ARCHIVE_COOLDOWN_MS = 800;
 
   /** Scroll position (px from top) that triggers progressive loading. */
   const SCROLL_TRIGGER_PX = 140;
@@ -43,9 +53,47 @@
   /** Class used for injected archive ("ghost") turns. */
   const GHOST_CLASS = 'lumen-ghost';
 
+  const PERF_STYLE_ID = 'lumen-perf-style';
+
+  /** Core rendering-cost rules — active while Lumen is enabled. */
+  const CORE_CSS = `
+    article[data-testid^="conversation-turn"] {
+      content-visibility: auto;
+      contain-intrinsic-size: auto 140px;
+      contain: layout style;
+    }
+    html { scroll-behavior: auto !important; }
+  `;
+
+  /** Applied only when the sidebar optimization feature is on. */
+  const SIDEBAR_CSS = `
+    nav li { content-visibility: auto; contain-intrinsic-size: auto 44px; }
+  `;
+
+  /** Applied only when the animation-kill feature is on. */
+  const VISUAL_CSS = `
+    * {
+      backdrop-filter: none !important;
+      -webkit-backdrop-filter: none !important;
+      transition: none !important;
+    }
+  `;
+
+  /** Archive ("ghost") turn styling — tied to the master switch. */
+  const GHOST_CSS = `
+    .lumen-ghost {
+      max-width: 48rem; margin: 0 auto; padding: 14px 18px;
+      border-bottom: 1px solid rgba(128,128,128,.16);
+      color: inherit; opacity: .94;
+    }
+    .lumen-ghost:first-child { padding-top: 6px; }
+    .lumen-ghost-role { font-size: 12px; font-weight: 600; letter-spacing: .02em; opacity: .55; margin-bottom: 4px; }
+    .lumen-ghost-body { font-size: 15px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; }
+  `;
+
   /* ══ State ══════════════════════════════════════════════════════════ */
 
-  let settings = { ...DEFAULTS };
+  let settings = structuredClone(DEFAULTS);
 
   /** Latest statistics mirrored from the main-world bridge. */
   let lastStatus = {
@@ -61,16 +109,11 @@
   let fetchTotal = 0;
   let fetchHidden = 0;
 
-  /** Extra DOM turns revealed above the configured limit (scroll-up). */
+  /** Extra DOM turns revealed above the window (scroll-up, same session). */
   let revealedExtra = 0;
 
   /** rAF coalescing flag for the DOM limiter. */
   let turnLimitQueued = false;
-
-  /** Last DOM state the limiter applied — enables a zero-work fast path
-      while a response is streaming (count unchanged → skip the loop). */
-  let appliedDomTotal = -1;
-  let appliedHideCount = -1;
 
   /** Progressive archive loader state (per conversation). */
   const archive = {
@@ -83,14 +126,18 @@
     cacheText: null
   };
 
-  /** Pending extract requests answered by the main-world bridge. */
+  /** Suppresses the scroll trigger while Lumen adjusts the viewport. */
+  let selfScrollUntil = 0;
+
+  /** Last DOM state applied by the limiter (fast path guard). */
+  let appliedDomTotal = -1;
+  let appliedHideCount = -1;
+
+  /** Pending archive-extract requests answered by the main-world bridge. */
   let extractReqId = 0;
 
   /** @type {Map<number, Function>} */
   const extractWaits = new Map();
-
-  /** Suppresses the scroll trigger while Lumen itself adjusts the viewport. */
-  let selfScrollUntil = 0;
 
   /* ══ Generic helpers ════════════════════════════════════════════════ */
 
@@ -101,17 +148,25 @@
     return Math.min(max, Math.max(min, value));
   }
 
-  /** Applies defaults and type-checks a raw settings object. */
+  /** Applies defaults and type-checks a raw settings object (settings v2). */
   function sanitize(raw) {
+    const f = raw && typeof raw.features === 'object' ? raw.features : {};
     return {
       enabled: typeof raw.enabled === 'boolean' ? raw.enabled : DEFAULTS.enabled,
-      limit: clamp(Number(raw.limit) || DEFAULTS.limit, 1, 200)
+      profile: PROFILES.includes(raw.profile) ? raw.profile : DEFAULTS.profile,
+      customLimit: clamp(Number(raw.customLimit) || DEFAULTS.customLimit, 2, 200),
+      features: {
+        instantScroll: f.instantScroll !== false,
+        sidebarOptimization: f.sidebarOptimization !== false,
+        telemetryBlock: f.telemetryBlock !== false,
+        disableAnimations: f.disableAnimations !== false
+      }
     };
   }
 
   /**
-   * Persists the active config for the main-world bridge and notifies it.
-   * @param {{enabled: boolean, limit: number}} next
+   * Persists the active config for the main-world bridge, syncs the perf
+   * style layers, and notifies the bridge.
    */
   function applySettings(next) {
     settings = sanitize({ ...settings, ...next });
@@ -119,12 +174,61 @@
       localStorage.setItem(CONFIG_KEY, JSON.stringify(settings));
     } catch { /* storage full — bridge keeps its previous config */ }
     window.dispatchEvent(new CustomEvent('lumen-config', { detail: settings }));
+    updatePerfStyles();
   }
 
-  /* ══ DOM limiter ════════════════════════════════════════════════════ */
+  /* ══ Perf style layers ══════════════════════════════════════════════ */
+
+  function setStyleElement(id, css) {
+    let el = document.getElementById(id);
+    if (!css) {
+      if (el) el.remove();
+      return;
+    }
+    if (!el) {
+      el = document.createElement('style');
+      el.id = id;
+      document.documentElement.appendChild(el);
+    }
+    if (el.textContent !== css) el.textContent = css;
+  }
+
+  /** Applies the style layers according to the current settings. */
+  function updatePerfStyles() {
+    const on = settings.enabled;
+    const f = settings.features;
+
+    setStyleElement('lumen-perf-core', on ? CORE_CSS : null);
+    setStyleElement('lumen-perf-sidebar', on && f.sidebarOptimization ? SIDEBAR_CSS : null);
+    setStyleElement('lumen-perf-visual', on && f.disableAnimations ? VISUAL_CSS : null);
+    setStyleElement('lumen-ghost-style', on ? GHOST_CSS : null);
+  }
+
+  /* ══ DOM windowing (turn limiter) ═══════════════════════════════════ */
 
   /**
-   * Keeps at most (limit + revealedExtra) turns mounted and visible.
+   * Window size for the current conversation state.
+   * Auto profile: small chats stay native, large chats get a proportional
+   * window (20-40 turns). Returns Infinity when no cap should apply.
+   */
+  function resolveKeep(domTotal) {
+    if (!settings.enabled) return Infinity;
+    const total = Math.max(fetchTotal, domTotal);
+
+    switch (settings.profile) {
+      case 'native': return Infinity;
+      case 'auto':
+        if (total <= 120) return Infinity;
+        return clamp(Math.round(total / 40), 20, 40);
+      case 'fast': return 10;
+      case 'balanced': return 20;
+      case 'extreme': return 5;
+      default: return clamp(settings.customLimit, 2, 200);
+    }
+  }
+
+  /**
+   * Keeps at most the resolved window of turns mounted-and-visible.
    * Older in-DOM turns are hidden, not removed — React stays consistent.
    */
   function applyTurnLimit() {
@@ -132,8 +236,6 @@
     const domTotal = turns.length;
 
     if (domTotal === 0) {
-      appliedDomTotal = 0;
-      appliedHideCount = 0;
       if (lastStatus.totalMessages !== 0 || lastStatus.hiddenMessages !== 0) {
         lastStatus.totalMessages = Math.max(fetchTotal, 0);
         lastStatus.renderedMessages = 0;
@@ -143,13 +245,9 @@
       return;
     }
 
-    const keep = settings.enabled
-      ? clamp(settings.limit + revealedExtra, 1, KEEP_HARD_CAP)
-      : KEEP_HARD_CAP;
-    const hideCount = Math.max(0, domTotal - keep);
+    const keep = resolveKeep(domTotal);
+    const hideCount = Number.isFinite(keep) ? Math.max(0, domTotal - keep) : 0;
 
-    /* Fast path: while a response streams in, the turn count only changes
-       when a turn is added — per-token frames skip the DOM pass entirely. */
     if (domTotal !== appliedDomTotal || hideCount !== appliedHideCount) {
       for (let i = 0; i < domTotal; i++) {
         const el = turns[i];
@@ -164,7 +262,7 @@
     }
 
     const total = Math.max(fetchTotal, domTotal);
-    const rendered = domTotal - hideCount;
+    const rendered = domTotal - hideCount + archive.injected;
     const hidden = Math.max(0, total - rendered);
 
     if (
@@ -206,7 +304,7 @@
     );
   }
 
-  /** Observes DOM changes so the cap holds during streaming and navigation. */
+  /** Observes DOM changes so the window holds during streaming/navigation. */
   function setupTurnLimiter() {
     new MutationObserver(records => {
       if (isTurnMutation(records)) queueTurnLimit();
@@ -219,7 +317,7 @@
     queueTurnLimit();
   }
 
-  /* ══ Progressive history: ghost turns ═══════════════════════════════ */
+  /* ══ Progressive history: archive turns ═════════════════════════════ */
 
   /**
    * Extracts the conversation UUID from a chat URL, if present.
@@ -249,11 +347,6 @@
   /**
    * Requests an archive slice from the main-world worker bridge.
    * The raw conversation JSON never touches the page's main thread JS.
-   *
-   * @param {string} text raw conversation payload
-   * @param {number} skip
-   * @param {number} count
-   * @returns {Promise<{items: Array<{role: string, text: string}>, reachedStart: boolean} | null>}
    */
   function requestExtract(text, skip, count) {
     return new Promise(resolve => {
@@ -271,9 +364,6 @@
   /**
    * Builds a read-only archive turn. Text-only by design: archived messages
    * are never re-rendered as live chat bubbles, so formatting is simplified.
-   *
-   * @param {{role: string, text: string}} item
-   * @returns {HTMLElement}
    */
   function buildGhostTurn(item) {
     const wrap = document.createElement('div');
@@ -295,7 +385,6 @@
   /**
    * Fetches one chunk of older messages and mounts it above the thread,
    * keeping the viewport anchored to the same content.
-   * @returns {Promise<void>}
    */
   async function loadOlderChunk() {
     const conversationId = getConversationId();
@@ -313,10 +402,9 @@
     const now = Date.now();
     if (now - archive.lastFetch < ARCHIVE_COOLDOWN_MS) return;
 
-    /* Messages already accounted for: rendered at load + ghosts injected.
-       This MUST shrink as chunks are consumed, otherwise the same slice
-       would be fetched forever. */
-    const skip = Math.max(0, fetchHidden - archive.injected);
+    /* skip = messages already visible at load + already injected ghosts */
+    const visibleBase = Math.max(0, fetchTotal - fetchHidden);
+    const skip = visibleBase + archive.injected;
     if (skip <= 0 || archive.injected >= GHOST_HARD_CAP) {
       archive.exhausted = true;
       return;
@@ -326,7 +414,7 @@
     archive.lastFetch = now;
 
     try {
-      /* download the conversation only once per chat, reuse for every chunk */
+      /* the conversation downloads only once per chat, then it is cached */
       if (!archive.cacheText) {
         const token = await getAccessToken();
         if (!token) return;
@@ -362,13 +450,12 @@
       container.insertBefore(fragment, container.firstChild);
       archive.injected += items.length;
 
-      /* Keep the viewport anchored — but never fight a bottom-anchored view
-         (adding content above cannot move a bottom-anchored reader). */
+      /* Keep the viewport anchored — never fight a bottom-anchored view. */
       const delta = document.documentElement.scrollHeight - heightBefore;
       const distanceToBottom =
         document.documentElement.scrollHeight - window.innerHeight - window.scrollY;
       if (delta > 0 && distanceToBottom > 240) {
-        selfScrollUntil = Date.now() + 150; /* ignore our own scroll event */
+        selfScrollUntil = Date.now() + 150;
         window.scrollBy(0, delta);
       }
 
@@ -384,9 +471,7 @@
 
   /**
    * Progressive loader, invoked when the user scrolls near the top:
-   *   1. reveal DOM turns hidden by the in-session limiter (instant, free),
-   *   2. otherwise fetch one archive chunk from the server.
-   * @returns {Promise<void>}
+   * first reveal DOM turns hidden by the window, then fetch archive chunks.
    */
   async function maybeLoadOlder() {
     if (!settings.enabled || archive.exhausted || archive.loading) return;
@@ -394,12 +479,12 @@
     if (window.scrollY > SCROLL_TRIGGER_PX) return;
     if (Date.now() < selfScrollUntil) return;
 
-    /* Step 1 — reveal turns that are already mounted. */
+    /* Step 1 — reveal DOM turns hidden by the window (instant, free). */
     const domTotal = document.querySelectorAll(TURN_SELECTOR).length;
-    const keep = clamp(settings.limit + revealedExtra, 1, KEEP_HARD_CAP);
-    const domHidden = Math.max(0, domTotal - keep);
+    const keep = resolveKeep(domTotal);
+    const domHidden = Number.isFinite(keep) ? Math.max(0, domTotal - keep) : 0;
     if (domHidden > 0) {
-      revealedExtra += domHidden;
+      revealedExtra += Math.min(HISTORY_CHUNK, domHidden);
       queueTurnLimit();
       return;
     }
@@ -429,17 +514,9 @@
     archive.injected = 0;
     archive.lastFetch = 0;
     archive.conversationId = '';
+    archive.cacheText = null;
     appliedDomTotal = -1;
     appliedHideCount = -1;
-    document.querySelectorAll(`.${GHOST_CLASS}`).forEach(node => node.remove());
-    lastStatus = {
-      layoutSupported: null,
-      totalMessages: 0,
-      renderedMessages: 0,
-      hiddenMessages: 0,
-      hasOlderMessages: false,
-      active: Boolean(settings.enabled)
-    };
     queueTurnLimit();
   }
 
@@ -460,9 +537,11 @@
         const waiter = extractWaits.get(event.data.reqId);
         if (waiter) {
           extractWaits.delete(event.data.reqId);
-          waiter({ items: event.data.items || [], reachedStart: !!event.data.reachedStart });
+          waiter({
+            items: event.data.items || [],
+            reachedStart: !!event.data.reachedStart
+          });
         }
-        return;
       }
 
       if (event.data.type === 'lumen-navigation') {
@@ -497,7 +576,7 @@
             ok: true,
             layoutSupported: lastStatus.layoutSupported,
             enabled: settings.enabled,
-            limit: settings.limit,
+            profile: settings.profile,
             totalMessages: lastStatus.totalMessages,
             renderedMessages: lastStatus.renderedMessages,
             hiddenMessages: lastStatus.hiddenMessages,

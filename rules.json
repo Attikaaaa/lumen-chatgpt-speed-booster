@@ -4,6 +4,7 @@
     "priority": 1,
     "action": { "type": "block" },
     "condition": {
+      "initiatorDomains": ["chatgpt.com", "chat.openai.com"],
       "requestDomains": ["ingest.sentry.io"],
       "resourceTypes": ["websocket", "xmlhttprequest", "ping", "image", "media", "script", "font", "stylesheet", "sub_frame", "other", "csp_report"]
     }
@@ -13,6 +14,7 @@
     "priority": 1,
     "action": { "type": "block" },
     "condition": {
+      "initiatorDomains": ["chatgpt.com", "chat.openai.com"],
       "requestDomains": ["statsig.com", "statsigapi.net", "featuregates.org"],
       "resourceTypes": ["websocket", "xmlhttprequest", "ping", "image", "media", "script", "font", "stylesheet", "sub_frame", "other", "csp_report"]
     }
@@ -22,6 +24,7 @@
     "priority": 1,
     "action": { "type": "block" },
     "condition": {
+      "initiatorDomains": ["chatgpt.com", "chat.openai.com"],
       "requestDomains": ["intercom.io", "intercomcdn.com"],
       "resourceTypes": ["websocket", "xmlhttprequest", "ping", "image", "media", "script", "font", "stylesheet", "sub_frame", "other", "csp_report"]
     }
@@ -31,6 +34,7 @@
     "priority": 1,
     "action": { "type": "block" },
     "condition": {
+      "initiatorDomains": ["chatgpt.com", "chat.openai.com"],
       "urlFilter": "||ab.chatgpt.com^",
       "resourceTypes": ["websocket", "xmlhttprequest", "ping", "image", "media", "script", "font", "stylesheet", "sub_frame", "other", "csp_report"]
     }
@@ -40,6 +44,7 @@
     "priority": 1,
     "action": { "type": "block" },
     "condition": {
+      "initiatorDomains": ["chatgpt.com", "chat.openai.com"],
       "requestDomains": ["bzr.openai.com", "bzrcdn.openai.com"],
       "resourceTypes": ["websocket", "xmlhttprequest", "ping", "image", "media", "script", "font", "stylesheet", "sub_frame", "other", "csp_report"]
     }
@@ -49,6 +54,7 @@
     "priority": 1,
     "action": { "type": "block" },
     "condition": {
+      "initiatorDomains": ["chatgpt.com", "chat.openai.com"],
       "urlFilter": "||chatgpt.com/ces/",
       "resourceTypes": ["xmlhttprequest", "ping"]
     }
@@ -58,6 +64,7 @@
     "priority": 1,
     "action": { "type": "block" },
     "condition": {
+      "initiatorDomains": ["chatgpt.com", "chat.openai.com"],
       "requestDomains": ["oaistatsig.com"],
       "resourceTypes": ["websocket", "xmlhttprequest", "ping", "image", "media", "script", "font", "stylesheet", "sub_frame", "other", "csp_report"]
     }
@@ -68,6 +75,7 @@
     "action": { "type": "block" },
     "condition": {
       "urlFilter": "||chatgpt.com/awe/",
+      "initiatorDomains": ["chatgpt.com", "chat.openai.com"],
       "resourceTypes": ["xmlhttprequest", "ping"]
     }
   },
@@ -76,6 +84,7 @@
     "priority": 1,
     "action": { "type": "block" },
     "condition": {
+      "initiatorDomains": ["chatgpt.com", "chat.openai.com"],
       "urlFilter": "||chatgpt.com/unauth-mweb/events/",
       "resourceTypes": ["xmlhttprequest", "ping"]
     }
@@ -85,6 +94,7 @@
     "priority": 1,
     "action": { "type": "block" },
     "condition": {
+      "initiatorDomains": ["chatgpt.com", "chat.openai.com"],
       "urlFilter": "||chatgpt.com/backend-api/sentinel/ping",
       "resourceTypes": ["xmlhttprequest", "ping"]
     }
@@ -94,6 +104,7 @@
     "priority": 1,
     "action": { "type": "block" },
     "condition": {
+      "initiatorDomains": ["chatgpt.com", "chat.openai.com"],
       "urlFilter": "||chatgpt.com/backend-api/codex/app-download-signal",
       "resourceTypes": ["xmlhttprequest", "ping"]
     }

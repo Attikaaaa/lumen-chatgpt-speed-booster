@@ -1,6 +1,7 @@
 /**
  * Lumen — ChatGPT Speed Booster · background service worker.
- * Seeds default settings and broadcasts changes to open ChatGPT tabs.
+ * Seeds default settings, broadcasts changes to open ChatGPT tabs, and
+ * toggles the telemetry blocklist together with the privacy feature.
  */
 
 (() => {
@@ -9,13 +10,25 @@
   /* ══ Constants ══════════════════════════════════════════════════════ */
 
   /** Default user settings — mirrored by the popup and the content script. */
-  const DEFAULTS = Object.freeze({ enabled: true, limit: 10 });
+  const DEFAULTS = Object.freeze({
+    enabled: true,
+    profile: 'auto',
+    customLimit: 10,
+    features: Object.freeze({
+      instantScroll: true,
+      sidebarOptimization: true,
+      telemetryBlock: true,
+      disableAnimations: true
+    })
+  });
 
   /** Hostnames Lumen operates on. */
   const SUPPORTED_HOSTS = ['chatgpt.com', 'chat.openai.com'];
 
   /** Settings storage (sync keeps preferences across devices). */
   const store = chrome.storage.sync || chrome.storage.local;
+
+  const RULESET_ID = 'network_rules';
 
   /* ══ Helpers ════════════════════════════════════════════════════════ */
 
@@ -34,22 +47,34 @@
     }
   }
 
-  /**
-   * Reads settings from storage, filling in defaults for missing keys.
-   * @returns {Promise<{enabled: boolean, limit: number}>}
-   */
-  async function getSettings() {
-    const raw = await store.get(DEFAULTS);
+  /** Normalizes any settings object into the canonical v2 shape. */
+  function sanitizeSettings(raw) {
+    const f = raw && typeof raw.features === 'object' ? raw.features : {};
+    const okProfile = ['auto', 'native', 'fast', 'balanced', 'extreme', 'custom'];
     return {
       enabled: typeof raw.enabled === 'boolean' ? raw.enabled : DEFAULTS.enabled,
-      limit: Number.isFinite(raw.limit) ? raw.limit : DEFAULTS.limit
+      profile: typeof raw.profile === 'string' && okProfile.includes(raw.profile)
+        ? raw.profile
+        : DEFAULTS.profile,
+      customLimit: Number.isFinite(raw.customLimit)
+        ? Math.min(200, Math.max(2, raw.customLimit))
+        : DEFAULTS.customLimit,
+      features: {
+        instantScroll: f.instantScroll !== false,
+        sidebarOptimization: f.sidebarOptimization !== false,
+        telemetryBlock: f.telemetryBlock !== false,
+        disableAnimations: f.disableAnimations !== false
+      }
     };
   }
 
-  /**
-   * Delivers the current settings to every supported, open tab.
-   * @returns {Promise<void>}
-   */
+  /** Reads settings from storage, filling in defaults for missing keys. */
+  async function getSettings() {
+    const raw = await store.get(DEFAULTS);
+    return sanitizeSettings(raw);
+  }
+
+  /** Delivers the current settings to every supported, open tab. */
   async function broadcastSettings() {
     const settings = await getSettings();
     const tabs = await chrome.tabs.query({});
@@ -57,66 +82,89 @@
       tabs
         .filter(tab => tab.id && isSupportedUrl(tab.url))
         .map(tab =>
-          /* Tabs without a live content script (loaded before install /
-             reload) reject asynchronously — swallow that, it's expected. */
           chrome.tabs.sendMessage(tab.id, { type: 'settingsUpdated', payload: settings })
-            .catch(() => {})
+            .catch(() => { /* tab has no receiver yet — it reads storage on init */ })
         )
     );
   }
 
-/* ══ Lifecycle ══════════════════════════════════════════════════════ */
+  /** Enables/disables the telemetry blocklist ruleset. */
+  function setNetworkRulesEnabled(enabled) {
+    const options = enabled
+      ? { enableRulesetIds: [RULESET_ID] }
+      : { disableRulesetIds: [RULESET_ID] };
+    try {
+      chrome.declarativeNetRequest.updateEnabledRulesets(options);
+    } catch { /* not fatal — rules stay in their previous state */ }
+  }
 
-/**
- * Injects Lumen into ChatGPT tabs that are already open (install / update /
- * dev reload). Chrome only auto-injects content scripts on new page loads.
- * Both scripts carry their own double-injection guards.
- * @returns {Promise<void>}
- */
-async function injectIntoExistingTabs() {
-  const tabs = await chrome.tabs.query({});
-  await Promise.all(
-    tabs
-      .filter(tab => tab.id && isSupportedUrl(tab.url))
-      .map(async tab => {
-        try {
-          await chrome.scripting.insertCSS({
-            target: { tabId: tab.id },
-            files: ['src/content/content.css']
-          });
-          await chrome.scripting.executeScript({
-            target: { tabId: tab.id },
-            world: 'MAIN',
-            files: ['src/content/main-world.js']
-          });
-          await chrome.scripting.executeScript({
-            target: { tabId: tab.id },
-            files: ['src/content/content.js']
-          });
-        } catch {
-          /* Tab not ready (discarded / loading) — normal injection covers it. */
-        }
-      })
-  );
-}
+  /* ══ Lifecycle ══════════════════════════════════════════════════════ */
 
-/** Seeds defaults so every reader can rely on a complete settings object. */
-chrome.runtime.onInstalled.addListener(async () => {
-  const raw = await store.get(DEFAULTS);
-  await store.set({
-    enabled: typeof raw.enabled === 'boolean' ? raw.enabled : DEFAULTS.enabled,
-    limit: Number.isFinite(raw.limit) ? raw.limit : DEFAULTS.limit
+  /** Seeds defaults, applies the privacy toggle, injects into open tabs. */
+  chrome.runtime.onInstalled.addListener(async () => {
+    const raw = await store.get(DEFAULTS);
+    const settings = sanitizeSettings(raw);
+    await store.set(settings);
+
+    setNetworkRulesEnabled(settings.features.telemetryBlock);
+    await injectIntoExistingTabs();
   });
-  await injectIntoExistingTabs();
-});
 
   /** Re-broadcasts settings whenever a relevant key changes. */
   chrome.storage.onChanged.addListener(async (changes, areaName) => {
     const expected = chrome.storage.sync ? 'sync' : 'local';
     if (areaName !== expected) return;
-    const relevant = Object.keys(changes).some(key => key in DEFAULTS);
-    if (relevant) await broadcastSettings();
+    const relevant = Object.keys(changes).some(key => key in DEFAULTS || key === 'features');
+    if (relevant) {
+      if (changes.features) {
+        const f = changes.features.newValue || {};
+        setNetworkRulesEnabled(f.telemetryBlock !== false);
+      }
+      await broadcastSettings();
+    }
   });
 
-  try { chrome.runtime.setUninstallURL(''); } catch { /* ignore */ }
+  /* ══ Open-tab injection ═════════════════════════════════════════════ */
+
+  /**
+   * Injects Lumen into ChatGPT tabs that are already open (install / update /
+   * dev reload). Chrome only auto-injects content scripts on new page loads.
+   * Both scripts carry their own double-injection guards.
+   * @returns {Promise<void>}
+   */
+  async function injectIntoExistingTabs() {
+    const tabs = await chrome.tabs.query({});
+    await Promise.all(
+      tabs
+        .filter(tab => tab.id && isSupportedUrl(tab.url))
+        .map(async tab => {
+          try {
+            await chrome.scripting.insertCSS({
+              target: { tabId: tab.id },
+              files: ['src/content/content.css']
+            });
+            await chrome.scripting.executeScript({
+              target: { tabId: tab.id },
+              world: 'MAIN',
+              files: ['src/content/main-world.js']
+            });
+            await chrome.scripting.executeScript({
+              target: { tabId: tab.id },
+              files: ['src/content/content.js']
+            });
+          } catch {
+            /* Tab not ready (discarded / loading) — normal injection covers it. */
+          }
+        })
+    );
+  }
+
+  /* ══ Uninstall URL ══════════════════════════════════════════════════ */
+
+  /* Lumen never redirects anywhere — including after uninstall. Chrome
+     persists the uninstall URL set by any previous version sharing this
+     extension ID, so it is explicitly cleared on every startup. */
+  try {
+    chrome.runtime.setUninstallURL('');
+  } catch { /* not fatal */ }
 })();

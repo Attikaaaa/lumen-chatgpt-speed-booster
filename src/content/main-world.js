@@ -15,13 +15,16 @@
   /* ══ Constants ══════════════════════════════════════════════════════ */
 
   /** localStorage key under which the content script publishes the config. */
-  const CONFIG_KEY = 'lumen_config_v1';
+  const CONFIG_KEY = 'lumen_config_v2';
 
   /** Default configuration (mirrors the popup's defaults). */
-  const DEFAULTS = Object.freeze({ enabled: true, limit: 10 });
+  const DEFAULTS = Object.freeze({ enabled: true, profile: 'auto', customLimit: 10 });
 
   /** Absolute ceiling for kept messages — a safety clamp, not a feature. */
   const KEEP_HARD_CAP = 5000;
+
+  /** Auto profile: chats at or below this size stay fully native. */
+  const AUTO_NATIVE_MAX = 120;
 
   /** Identifies every postMessage emitted by this script. */
   const MESSAGE_SOURCE = 'lumen_main';
@@ -54,8 +57,22 @@
   function sanitize(raw) {
     return {
       enabled: typeof raw.enabled === 'boolean' ? raw.enabled : DEFAULTS.enabled,
-      limit: clamp(Number(raw.limit) || DEFAULTS.limit, 1, 200)
+      profile: typeof raw.profile === 'string' ? raw.profile : DEFAULTS.profile,
+      customLimit: clamp(Number(raw.customLimit) || DEFAULTS.customLimit, 2, 200)
     };
+  }
+
+  /** Counts visible user/assistant messages in a parsed payload. */
+  function countBubbles(payload) {
+    if (!payload || typeof payload !== 'object' || !payload.mapping || !payload.current_node) return 0;
+    const path = buildPath(payload.mapping, payload.current_node);
+    return path.filter(id => isVisibleMessage(payload.mapping[id])).length;
+  }
+
+  /** Window size for the auto profile, derived from the message count. */
+  function autoKeep(total) {
+    if (total <= AUTO_NATIVE_MAX) return KEEP_HARD_CAP; /* keep everything */
+    return clamp(Math.round(total / 40), 20, 40);
   }
 
   /** Reads the configuration published by the isolated content script. */
@@ -280,7 +297,13 @@
               self.postMessage({ id: data.id, ok: true, items: out.items, reachedStart: out.reachedStart });
               return;
             }
-            const result = trimWithKeep(JSON.parse(data.text), data.keep);
+            const parsed = JSON.parse(data.text);
+            let keep = data.keep;
+            if (data.auto) {
+              const total = countBubbles(parsed);
+              keep = autoKeep(total);
+            }
+            const result = trimWithKeep(parsed, keep);
             if (!result) { self.postMessage({ id: data.id, ok: true, missing: true }); return; }
             if (result.passthrough) {
               self.postMessage({ id: data.id, ok: true, passthrough: true, status: result.status });
@@ -292,7 +315,7 @@
           }
         };
       `;
-      const source = [clamp, isMessageNode, isVisibleMessage, buildPath, trimWithKeep, extractSlice]
+      const source = [clamp, isMessageNode, isVisibleMessage, buildPath, countBubbles, autoKeep, trimWithKeep, extractSlice]
         .map(fn => fn.toString())
         .join('\n') + '\n' + handler;
 
@@ -324,7 +347,7 @@
    * @param {number} keep
    * @returns {Promise<{passthrough?: boolean, status: object, text?: string} | null>}
    */
-  function trimViaWorker(text, keep) {
+  function trimViaWorker(text, keep, auto) {
     return new Promise(resolve => {
       ensureTrimWorker();
       if (!trimWorker) {
@@ -347,7 +370,7 @@
         }
       });
 
-      trimWorker.postMessage({ id, text, keep });
+      trimWorker.postMessage({ id, text, keep, auto });
     });
   }
 
@@ -390,8 +413,12 @@
 
       try {
         const text = await response.clone().text();
-        const keep = clamp(settings.limit, 1, KEEP_HARD_CAP);
-        const trimmed = await trimViaWorker(text, keep);
+
+        /* Auto profile: the worker counts bubbles after parsing and picks
+           a proportional window (20-40). Other profiles use a fixed keep. */
+        const auto = settings.profile === 'auto';
+        const keep = auto ? 20 : clamp(settings.customLimit, 2, KEEP_HARD_CAP);
+        const trimmed = await trimViaWorker(text, keep, auto);
 
         if (!trimmed) {
           postStatus({ layoutSupported: false });
@@ -421,29 +448,38 @@
 
   /* ══ Instant programmatic scrolling ═════════════════════════════════ */
 
-  /* Rewrite JS-driven smooth scrolling to instant; wheel/touch is untouched. */
-  function patchScrolling() {
-    const toInstant = args => {
-      if (args.length === 1 && args[0] && typeof args[0] === 'object' && args[0].behavior === 'smooth') {
-        return [{ ...args[0], behavior: 'instant' }];
-      }
-      return args;
-    };
+  /* Rewrite JS-driven smooth scrolling to instant; wheel/touch is untouched.
+     Toggleable at runtime so pausing Lumen restores native behavior. */
+  let scrollPatched = false;
+  const nativeScroll = {};
 
-    const nativeScrollIntoView = Element.prototype.scrollIntoView;
-    Element.prototype.scrollIntoView = function (...args) {
-      return nativeScrollIntoView.apply(this, toInstant(args));
-    };
-
-    const nativeScrollTo = window.scrollTo.bind(window);
-    window.scrollTo = function (...args) {
-      return nativeScrollTo(...toInstant(args));
-    };
-
-    const nativeScrollBy = window.scrollBy.bind(window);
-    window.scrollBy = function (...args) {
-      return nativeScrollBy(...toInstant(args));
-    };
+  function applyScrollPatch(on) {
+    if (on && !scrollPatched) {
+      const toInstant = args => {
+        if (args.length === 1 && args[0] && typeof args[0] === 'object' && args[0].behavior === 'smooth') {
+          return [{ ...args[0], behavior: 'instant' }];
+        }
+        return args;
+      };
+      nativeScroll.siv = Element.prototype.scrollIntoView;
+      Element.prototype.scrollIntoView = function (...args) {
+        return nativeScroll.siv.apply(this, toInstant(args));
+      };
+      nativeScroll.scrollTo = window.scrollTo;
+      window.scrollTo = function (...args) {
+        return nativeScroll.scrollTo.apply(window, toInstant(args));
+      };
+      nativeScroll.scrollBy = window.scrollBy;
+      window.scrollBy = function (...args) {
+        return nativeScroll.scrollBy.apply(window, toInstant(args));
+      };
+      scrollPatched = true;
+    } else if (!on && scrollPatched) {
+      Element.prototype.scrollIntoView = nativeScroll.siv;
+      window.scrollTo = nativeScroll.scrollTo;
+      window.scrollBy = nativeScroll.scrollBy;
+      scrollPatched = false;
+    }
   }
 
   /* ══ SPA navigation tracking ════════════════════════════════════════ */
@@ -469,6 +505,7 @@
     const incoming = event && event.detail ? event.detail : null;
     if (!incoming || typeof incoming !== 'object') return;
     settings = sanitize({ ...settings, ...incoming });
+    applyScrollPatch(settings.enabled && settings.features.instantScroll);
     postStatus({ active: Boolean(settings.enabled) });
   });
 
@@ -510,7 +547,7 @@
 
   /* ══ Boot ═══════════════════════════════════════════════════════════ */
 
-  patchScrolling();
+  applyScrollPatch(settings.enabled && settings.features.instantScroll);
   patchFetch();
   postStatus({});
 })();
