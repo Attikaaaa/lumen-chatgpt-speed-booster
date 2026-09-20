@@ -18,7 +18,12 @@
   const CONFIG_KEY = 'lumen_config_v2';
 
   /** Default configuration (mirrors the popup's defaults). */
-  const DEFAULTS = Object.freeze({ enabled: true, profile: 'auto', customLimit: 10 });
+  const DEFAULTS = Object.freeze({
+    enabled: true,
+    profile: 'auto',
+    customLimit: 10,
+    features: Object.freeze({ instantScroll: true, disableAnimations: true })
+  });
 
   /** Absolute ceiling for kept messages — a safety clamp, not a feature. */
   const KEEP_HARD_CAP = 5000;
@@ -55,10 +60,15 @@
 
   /** Applies defaults and type-checks a raw settings object. */
   function sanitize(raw) {
+    const f = raw && typeof raw.features === 'object' ? raw.features : {};
     return {
       enabled: typeof raw.enabled === 'boolean' ? raw.enabled : DEFAULTS.enabled,
       profile: typeof raw.profile === 'string' ? raw.profile : DEFAULTS.profile,
-      customLimit: clamp(Number(raw.customLimit) || DEFAULTS.customLimit, 2, 200)
+      customLimit: clamp(Number(raw.customLimit) || DEFAULTS.customLimit, 2, 200),
+      features: {
+        instantScroll: f.instantScroll !== false,
+        disableAnimations: f.disableAnimations !== false
+      }
     };
   }
 
@@ -254,7 +264,8 @@
       const text = parts.filter(part => typeof part === 'string').join('\n').trim();
       if (text) items.push({ role: message.author.role, text });
     }
-    return { items, reachedStart: start === 0 };
+    /* consumed = bubbles actually stepped over (includes non-text turns) */
+    return { items, consumedCount: end - start, reachedStart: start === 0 };
   }
 
   /* ══ Off-main-thread trimming ═══════════════════════════════════════ */
@@ -320,7 +331,10 @@
         .join('\n') + '\n' + handler;
 
       const blob = new Blob([source], { type: 'application/javascript' });
-      trimWorker = new Worker(URL.createObjectURL(blob));
+      const blobUrl = URL.createObjectURL(blob);
+      trimWorker = new Worker(blobUrl);
+      /* the worker has the script — release the blob reference */
+      setTimeout(() => { try { URL.revokeObjectURL(blobUrl); } catch { /* noop */ } }, 30000);
 
       trimWorker.onmessage = event => {
         const job = trimJobs.get(event.data.id);
@@ -334,6 +348,12 @@
         trimWorkerDead = true;
         try { trimWorker.terminate(); } catch { /* already gone */ }
         trimWorker = null;
+        /* flush pending jobs so callers fall back to the sync path at once */
+        for (const [, job] of trimJobs) {
+          clearTimeout(job.timer);
+          job.resolve({ ok: false });
+        }
+        trimJobs.clear();
       };
     } catch {
       trimWorkerDead = true;
@@ -484,10 +504,15 @@
 
   /* ══ SPA navigation tracking ════════════════════════════════════════ */
 
+  let lastNavHref = location.href;
+
   /** Tells the content script that the visible conversation changed. */
   function notifyNavigation() {
+    const href = location.href;
+    if (href === lastNavHref) return;
+    lastNavHref = href;
     window.postMessage(
-      { source: MESSAGE_SOURCE, type: 'lumen-navigation', url: location.href },
+      { source: MESSAGE_SOURCE, type: 'lumen-navigation', url: href },
       location.origin
     );
   }
@@ -497,6 +522,13 @@
     nativePushState(...args);
     notifyNavigation();
   };
+
+  const nativeReplaceState = history.replaceState.bind(history);
+  history.replaceState = function (...args) {
+    nativeReplaceState(...args);
+    notifyNavigation();
+  };
+
   window.addEventListener('popstate', notifyNavigation);
 
   /* ══ Config bridge (isolated world → here) ══════════════════════════ */

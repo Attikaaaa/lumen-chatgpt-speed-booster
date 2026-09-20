@@ -12,3 +12,6 @@ Thumbs.db
 
 # internal planning (not for release)
 ROADMAP.md
+ROADMAP.md
+frames/
+*.log

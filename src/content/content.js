@@ -121,6 +121,7 @@
     loading: false,
     exhausted: false,
     injected: 0,
+    consumed: 0,
     lastFetch: 0,
     accessToken: null,
     cacheText: null
@@ -395,6 +396,7 @@
       archive.exhausted = false;
       archive.loading = false;
       archive.injected = 0;
+      archive.consumed = 0;
       archive.cacheText = null;
     }
     if (archive.exhausted || archive.loading) return;
@@ -402,9 +404,11 @@
     const now = Date.now();
     if (now - archive.lastFetch < ARCHIVE_COOLDOWN_MS) return;
 
-    /* skip = messages already visible at load + already injected ghosts */
+    /* skip = messages already visible at load + messages consumed so far.
+       Counting consumed turns (not text items) keeps the pagination gap-free
+       even when some turns carry no renderable text. */
     const visibleBase = Math.max(0, fetchTotal - fetchHidden);
-    const skip = visibleBase + archive.injected;
+    const skip = visibleBase + archive.consumed;
     if (skip <= 0 || archive.injected >= GHOST_HARD_CAP) {
       archive.exhausted = true;
       return;
@@ -433,12 +437,13 @@
 
       const result = await requestExtract(archive.cacheText, skip, HISTORY_CHUNK);
       if (!result) return;
-      const { items, reachedStart } = result;
+      const { items, reachedStart, consumedCount } = result;
 
-      if (items.length === 0) {
+      if (items.length === 0 || consumedCount === 0) {
         archive.exhausted = true;
         return;
       }
+      archive.consumed += consumedCount;
 
       const firstTurn = document.querySelector(TURN_SELECTOR);
       const container = firstTurn && firstTurn.parentElement;
@@ -459,7 +464,7 @@
         window.scrollBy(0, delta);
       }
 
-      if (reachedStart || items.length < HISTORY_CHUNK || archive.injected >= GHOST_HARD_CAP) {
+      if (reachedStart || consumedCount < HISTORY_CHUNK || archive.injected >= GHOST_HARD_CAP) {
         archive.exhausted = true;
       }
     } catch {
@@ -512,6 +517,7 @@
     archive.loading = false;
     archive.exhausted = false;
     archive.injected = 0;
+    archive.consumed = 0;
     archive.lastFetch = 0;
     archive.conversationId = '';
     archive.cacheText = null;
