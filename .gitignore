@@ -9,3 +9,6 @@ _metadata/
 # OS noise
 .DS_Store
 Thumbs.db
+
+# internal planning (not for release)
+ROADMAP.md
