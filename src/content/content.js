@@ -79,8 +79,15 @@
     exhausted: false,
     injected: 0,
     lastFetch: 0,
-    accessToken: null
+    accessToken: null,
+    cacheText: null
   };
+
+  /** Pending extract requests answered by the main-world bridge. */
+  let extractReqId = 0;
+
+  /** @type {Map<number, Function>} */
+  const extractWaits = new Map();
 
   /** Suppresses the scroll trigger while Lumen itself adjusts the viewport. */
   let selfScrollUntil = 0;
@@ -240,50 +247,25 @@
   }
 
   /**
-   * Extracts a chronological slice of visible messages from a conversation
-   * payload, counting from the END (newest) backwards.
+   * Requests an archive slice from the main-world worker bridge.
+   * The raw conversation JSON never touches the page's main thread JS.
    *
-   * @param {*} payload   parsed /backend-api/conversation/:id response
-   * @param {number} skip how many newest messages to skip
-   * @param {number} count how many messages to return
-   * @returns {{items: Array<{role: string, text: string}>, reachedStart: boolean}}
+   * @param {string} text raw conversation payload
+   * @param {number} skip
+   * @param {number} count
+   * @returns {Promise<{items: Array<{role: string, text: string}>, reachedStart: boolean} | null>}
    */
-  function extractMessageSlice(payload, skip, count) {
-    if (!payload || typeof payload !== 'object' || !payload.mapping || !payload.current_node) {
-      return { items: [], reachedStart: true };
-    }
-
-    const mapping = payload.mapping;
-    const guard = new Set();
-    const path = [];
-    let id = payload.current_node;
-    while (id && mapping[id] && !guard.has(id)) {
-      guard.add(id);
-      path.unshift(id);
-      id = mapping[id].parent;
-    }
-
-    const bubbles = path
-      .map(nodeId => mapping[nodeId])
-      .filter(node => {
-        const role = node && node.message && node.message.author && node.message.author.role;
-        return role === 'user' || role === 'assistant';
-      });
-
-    const end = Math.max(0, bubbles.length - skip);
-    const start = Math.max(0, end - count);
-
-    const items = [];
-    for (let i = start; i < end; i++) {
-      const message = bubbles[i].message;
-      const parts = (message.content && Array.isArray(message.content.parts))
-        ? message.content.parts
-        : [];
-      const text = parts.filter(part => typeof part === 'string').join('\n').trim();
-      if (text) items.push({ role: message.author.role, text });
-    }
-
-    return { items, reachedStart: start === 0 };
+  function requestExtract(text, skip, count) {
+    return new Promise(resolve => {
+      const reqId = ++extractReqId;
+      extractWaits.set(reqId, resolve);
+      window.dispatchEvent(new CustomEvent('lumen-extract-request', {
+        detail: { reqId, text, skip, count }
+      }));
+      setTimeout(() => {
+        if (extractWaits.delete(reqId)) resolve(null);
+      }, 6500);
+    });
   }
 
   /**
@@ -324,6 +306,7 @@
       archive.exhausted = false;
       archive.loading = false;
       archive.injected = 0;
+      archive.cacheText = null;
     }
     if (archive.exhausted || archive.loading) return;
 
@@ -343,21 +326,26 @@
     archive.lastFetch = now;
 
     try {
-      const token = await getAccessToken();
-      if (!token) return;
+      /* download the conversation only once per chat, reuse for every chunk */
+      if (!archive.cacheText) {
+        const token = await getAccessToken();
+        if (!token) return;
 
-      const response = await fetch(`/backend-api/conversation/${conversationId}`, {
-        credentials: 'include',
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      if (response.status === 401) {
-        archive.accessToken = null;
-        return;
+        const response = await fetch(`/backend-api/conversation/${conversationId}`, {
+          credentials: 'include',
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        if (response.status === 401) {
+          archive.accessToken = null;
+          return;
+        }
+        if (!response.ok) return;
+        archive.cacheText = await response.text();
       }
-      if (!response.ok) return;
 
-      const payload = await response.json();
-      const { items, reachedStart } = extractMessageSlice(payload, skip, HISTORY_CHUNK);
+      const result = await requestExtract(archive.cacheText, skip, HISTORY_CHUNK);
+      if (!result) return;
+      const { items, reachedStart } = result;
 
       if (items.length === 0) {
         archive.exhausted = true;
@@ -466,6 +454,15 @@
         fetchTotal = Number(event.data.payload.totalMessages) || 0;
         fetchHidden = Number(event.data.payload.hiddenMessages) || 0;
         queueTurnLimit();
+      }
+
+      if (event.data.type === 'lumen-extract-response') {
+        const waiter = extractWaits.get(event.data.reqId);
+        if (waiter) {
+          extractWaits.delete(event.data.reqId);
+          waiter({ items: event.data.items || [], reachedStart: !!event.data.reachedStart });
+        }
+        return;
       }
 
       if (event.data.type === 'lumen-navigation') {

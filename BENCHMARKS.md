@@ -49,7 +49,7 @@ the background worker thread.
 
 **Per-conversation-size speedup factors:**
 
-| Messages | Data transferred | Main-thread parse work | |
+| Messages | Data processed | Main-thread parse work | |
 | ---: | ---: | ---: | ---: |
 | 250 | 19.7× less (−94.9 %) | 20× less (−95.0 %) | |
 | 500 | 32.9× less (−97.0 %) | 48× less (−97.9 %) | |

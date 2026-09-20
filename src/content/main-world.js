@@ -203,6 +203,43 @@
     };
   }
 
+  /* ══ Archive extraction (pure — safe for the worker) ═════════════════ */
+
+  /**
+   * Pulls a chronological slice of visible messages out of a full
+   * conversation payload, counting from the newest backwards.
+   * @param {*} payload parsed conversation response
+   * @param {number} skip  how many newest messages to skip
+   * @param {number} count how many messages to return
+   * @returns {{items: Array<{role: string, text: string}>, reachedStart: boolean} | null}
+   */
+  function extractSlice(payload, skip, count) {
+    if (!payload || typeof payload !== 'object' || !payload.mapping || !payload.current_node) {
+      return null;
+    }
+    const mapping = payload.mapping;
+    const path = buildPath(mapping, payload.current_node);
+    if (path.length === 0) return null;
+
+    const bubbles = path
+      .map(id => mapping[id])
+      .filter(node => {
+        const role = node && node.message && node.message.author && node.message.author.role;
+        return role === 'user' || role === 'assistant';
+      });
+
+    const end = Math.max(0, bubbles.length - skip);
+    const start = Math.max(0, end - count);
+    const items = [];
+    for (let i = start; i < end; i++) {
+      const message = bubbles[i].message;
+      const parts = message.content && Array.isArray(message.content.parts) ? message.content.parts : [];
+      const text = parts.filter(part => typeof part === 'string').join('\n').trim();
+      if (text) items.push({ role: message.author.role, text });
+    }
+    return { items, reachedStart: start === 0 };
+  }
+
   /* ══ Off-main-thread trimming ═══════════════════════════════════════ */
 
   /**
@@ -237,6 +274,12 @@
         self.onmessage = (event) => {
           const data = event.data;
           try {
+            if (data.mode === 'extract') {
+              const out = extractSlice(JSON.parse(data.text), data.skip, data.count);
+              if (!out) { self.postMessage({ id: data.id, ok: true, missing: true }); return; }
+              self.postMessage({ id: data.id, ok: true, items: out.items, reachedStart: out.reachedStart });
+              return;
+            }
             const result = trimWithKeep(JSON.parse(data.text), data.keep);
             if (!result) { self.postMessage({ id: data.id, ok: true, missing: true }); return; }
             if (result.passthrough) {
@@ -249,7 +292,7 @@
           }
         };
       `;
-      const source = [clamp, isMessageNode, isVisibleMessage, buildPath, trimWithKeep]
+      const source = [clamp, isMessageNode, isVisibleMessage, buildPath, trimWithKeep, extractSlice]
         .map(fn => fn.toString())
         .join('\n') + '\n' + handler;
 
@@ -431,6 +474,38 @@
 
   window.addEventListener('lumen-request-status', () => {
     postStatus({});
+  });
+
+  /* ══ Config bridge (isolated world → here) ══════════════════════════ */
+
+  /* Archive-slice requests from the content script run through the same
+     worker, keeping heavy JSON.parse off the page's main thread. */
+  window.addEventListener('lumen-extract-request', event => {
+    const d = event && event.detail ? event.detail : null;
+    if (!d) return;
+    ensureTrimWorker();
+
+    if (!trimWorker) {
+      /* worker unavailable — parse here so the feature still works */
+      try {
+        const payload = JSON.parse(d.text);
+        const out = extractSlice(payload, d.skip, d.count);
+        window.postMessage({
+          source: MESSAGE_SOURCE, type: 'lumen-extract-response', reqId: d.reqId,
+          items: out ? out.items : [], reachedStart: out ? out.reachedStart : true
+        }, location.origin);
+      } catch { /* malformed payload — requester treats empty as exhausted */ }
+      return;
+    }
+
+    const id = ++trimJobId;
+    trimJobs.set(id, result => {
+      window.postMessage({
+        source: MESSAGE_SOURCE, type: 'lumen-extract-response', reqId: d.reqId,
+        ok: result.ok, items: result.items || [], reachedStart: !!result.reachedStart
+      }, location.origin);
+    });
+    trimWorker.postMessage({ id, mode: 'extract', text: d.text, skip: d.skip, count: d.count });
   });
 
   /* ══ Boot ═══════════════════════════════════════════════════════════ */
